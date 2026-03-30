@@ -90,15 +90,64 @@ IB_PORT=7497 python tlade_bridge_lite.py
 
 ## Troubleshooting
 
-**"IB not connected" in terminal**
-- Check TWS is running and API is enabled
-- Verify port 7496 is correct (7497 for paper)
-- Check TWS API log for connection attempts
+### Bridge won't start / "Address already in use"
 
-**Bridge crashes on start**
-- Make sure no other process uses port 5000
-- Try `BRIDGE_PORT=5001` (update won't auto-detect yet)
+Port 5000 is already taken by another process. Find out what:
+```bash
+# Windows
+netstat -ano | findstr :5000
 
-**"No data for ES"**
-- TWS needs a moment to load contracts after market open
-- Check your IB market data subscriptions include CME futures
+# Mac/Linux
+lsof -i :5000
+```
+Common culprits: another bridge instance, AirPlay Receiver (Mac port 5000), or a local dev server. Kill the process or change the bridge port:
+```bash
+set BRIDGE_PORT=5001
+python tlade_bridge_lite.py
+```
+> Note: TLADe terminal currently auto-detects only port 5000. Custom port support coming soon.
+
+### "IB not connected" in TLADe terminal
+
+1. **Is TWS running?** The bridge needs TWS or IB Gateway open
+2. **Is the API enabled?** TWS > File > Global Configuration > API > Settings:
+   - "Enable ActiveX and Socket Clients" must be checked
+   - Port must match (default: **7496** live, **7497** paper)
+3. **Is the port correct?** Check what TWS is actually listening on:
+   ```bash
+   # Windows
+   netstat -ano | findstr :7496
+   ```
+   If no result, TWS isn't listening. Double-check the API settings and restart TWS.
+4. **Firewall?** Windows Defender or antivirus may block localhost connections. Allow Python through the firewall.
+5. **Client ID conflict?** If you have other TWS API connections (MultiCharts, Sierra Chart, etc.), they may use the same client ID. Change it:
+   ```bash
+   set IB_CLIENT=20
+   python tlade_bridge_lite.py
+   ```
+
+### "No data for ES" / "No data for NQ"
+
+- **Market data subscription required.** Your IB account must have CME real-time data. Check in TWS: Account > Market Data Subscriptions.
+- **Contract not found.** This can happen briefly during futures roll week. The bridge auto-selects the front-month contract — wait a minute and retry.
+- **Paper account limitations.** Paper trading accounts have delayed/limited data. Some market data may not stream via API. Try with a live account.
+
+### Bridge connects but TLADe doesn't show live data
+
+1. Open browser console (F12) and check for `[IB] TWS detected` message
+2. If you see `[IB Detector] Started health polling` but no detection:
+   - The bridge may be on a different port — verify it's on 5000
+   - Try opening `http://localhost:5000/health` in your browser — you should see JSON with `"ib_connected": true`
+3. **HTTPS/Mixed content issue:** If you're on `https://tradelikeadealer.com`, the browser blocks `http://localhost` requests on some configurations. Check console for "Mixed Content" errors.
+
+### Python not found (start.bat)
+
+- Make sure you checked **"Add Python to PATH"** during Python installation
+- If you installed Python but `start.bat` still can't find it, restart your terminal/PC
+- Or run manually: `C:\Users\YourName\AppData\Local\Programs\Python\Python3x\python.exe tlade_bridge_lite.py`
+
+### pip install fails
+
+- **Behind corporate proxy:** `pip install --proxy http://your-proxy:port flask flask-cors ib_insync`
+- **Permission error:** Try `pip install --user flask flask-cors ib_insync`
+- **Old pip:** `python -m pip install --upgrade pip` then retry
