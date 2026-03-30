@@ -73,6 +73,49 @@ def ib_loop():
                         tickers[sym] = ib.reqMktData(c, '', False, False)
 
             print('[IB] ES + NQ streaming')
+
+            # Pre-fetch daily and history in IB thread (avoids threading issues from Flask)
+            for sym in ['ES', 'NQ']:
+                c = contracts.get(sym)
+                if not c:
+                    continue
+                today = datetime.now().strftime('%Y-%m-%d')
+                try:
+                    daily_bars = ib.reqHistoricalData(
+                        c, endDateTime='', durationStr='1 Y',
+                        barSizeSetting='1 day', whatToShow='TRADES',
+                        useRTH=True, formatDate=1, keepUpToDate=False
+                    )
+                    result = []
+                    for bar in daily_bars:
+                        try:
+                            t = int(bar.date.timestamp()) if hasattr(bar.date, 'timestamp') else int(datetime.strptime(str(bar.date), '%Y-%m-%d').timestamp())
+                            if t <= 0: continue
+                            result.append({'t': t, 'o': bar.open, 'h': bar.high, 'l': bar.low, 'c': bar.close, 'v': int(bar.volume) if bar.volume else 0})
+                        except: continue
+                    _daily_cache[sym] = {'date': today, 'data': result}
+                    print(f'[IB] Daily pre-fetched: {len(result)} bars for {sym}')
+                except Exception as e:
+                    print(f'[IB] Daily pre-fetch failed for {sym}: {e}')
+
+                try:
+                    hist_bars = ib.reqHistoricalData(
+                        c, endDateTime='', durationStr='2 W',
+                        barSizeSetting='5 mins', whatToShow='TRADES',
+                        useRTH=False, formatDate=1, keepUpToDate=False
+                    )
+                    result = []
+                    for bar in hist_bars:
+                        try:
+                            t = int(bar.date.timestamp())
+                            if t <= 0: continue
+                            result.append({'t': t, 'o': bar.open, 'h': bar.high, 'l': bar.low, 'c': bar.close, 'v': int(bar.volume) if bar.volume else 0})
+                        except: continue
+                    _history_cache[sym] = {'date': today, 'data': result}
+                    print(f'[IB] History pre-fetched: {len(result)} bars for {sym} (2W 5min)')
+                except Exception as e:
+                    print(f'[IB] History pre-fetch failed for {sym}: {e}')
+
             while ib.isConnected():
                 ib.sleep(2)
 
@@ -144,88 +187,26 @@ def ib_data():
 
 @app.route('/ib_daily')
 def ib_daily():
-    """1 year daily bars from IB — one-shot, cached per day."""
+    """1Y daily bars — served from pre-fetched cache (no on-demand IB calls)."""
     ticker = request.args.get('ticker', 'ES').upper()
     sym = 'NQ' if 'NQ' in ticker else 'ES'
-    today = datetime.now().strftime('%Y-%m-%d')
 
-    # Cache hit
-    if sym in _daily_cache and _daily_cache[sym].get('date') == today:
+    if sym in _daily_cache and _daily_cache[sym].get('data'):
         return jsonify({'data': _daily_cache[sym]['data'], 'instrument': sym, 'cached': True})
 
-    ib = _ib_ref
-    c = contracts.get(sym)
-    if not ib or not c or not connected:
-        return jsonify({'error': 'IB not connected'}), 503
-
-    try:
-        daily_bars = ib.reqHistoricalData(
-            c, endDateTime='', durationStr='1 Y',
-            barSizeSetting='1 day', whatToShow='TRADES',
-            useRTH=True, formatDate=1, keepUpToDate=False
-        )
-        result = []
-        for bar in daily_bars:
-            try:
-                t = int(bar.date.timestamp()) if hasattr(bar.date, 'timestamp') else int(datetime.strptime(str(bar.date), '%Y-%m-%d').timestamp())
-                if t <= 0: continue
-                result.append({
-                    't': t, 'o': bar.open, 'h': bar.high,
-                    'l': bar.low, 'c': bar.close,
-                    'v': int(bar.volume) if bar.volume else 0
-                })
-            except: continue
-
-        _daily_cache[sym] = {'date': today, 'data': result}
-        print(f'[IB] Daily bars fetched: {len(result)} for {sym}')
-        return jsonify({'data': result, 'instrument': sym, 'cached': False})
-
-    except Exception as e:
-        print(f'[IB] Daily fetch error: {e}')
-        return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'Daily data not yet available — bridge is warming up'}), 503
 
 
 @app.route('/ib_history')
 def ib_history():
-    """2 weeks of 5min bars from IB — real tick volume for VP/AVWAP."""
+    """2W 5min bars — served from pre-fetched cache (no on-demand IB calls)."""
     ticker = request.args.get('ticker', 'ES').upper()
     sym = 'NQ' if 'NQ' in ticker else 'ES'
-    today = datetime.now().strftime('%Y-%m-%d')
 
-    # Cache hit
-    if sym in _history_cache and _history_cache[sym].get('date') == today:
+    if sym in _history_cache and _history_cache[sym].get('data'):
         return jsonify({'data': _history_cache[sym]['data'], 'instrument': sym, 'cached': True})
 
-    ib = _ib_ref
-    c = contracts.get(sym)
-    if not ib or not c or not connected:
-        return jsonify({'error': 'IB not connected'}), 503
-
-    try:
-        hist_bars = ib.reqHistoricalData(
-            c, endDateTime='', durationStr='2 W',
-            barSizeSetting='5 mins', whatToShow='TRADES',
-            useRTH=False, formatDate=1, keepUpToDate=False
-        )
-        result = []
-        for bar in hist_bars:
-            try:
-                t = int(bar.date.timestamp())
-                if t <= 0: continue
-                result.append({
-                    't': t, 'o': bar.open, 'h': bar.high,
-                    'l': bar.low, 'c': bar.close,
-                    'v': int(bar.volume) if bar.volume else 0
-                })
-            except: continue
-
-        _history_cache[sym] = {'date': today, 'data': result}
-        print(f'[IB] History bars fetched: {len(result)} for {sym} (2W 5min)')
-        return jsonify({'data': result, 'instrument': sym, 'cached': False})
-
-    except Exception as e:
-        print(f'[IB] History fetch error: {e}')
-        return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'History data not yet available — bridge is warming up'}), 503
 
 # ── Main ──
 if __name__ == '__main__':
