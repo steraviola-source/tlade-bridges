@@ -13,11 +13,10 @@ Connect your TWS or IB Gateway to TLADe for real-time ES/NQ data with tick-accur
 ## Requirements
 
 - Interactive Brokers account (live or paper)
-- TWS or IB Gateway running
-- Python 3.8+
+- TWS or IB Gateway running with API enabled
 - TLADe subscription
 
-## Setup (5 minutes)
+## Quick Start (Windows)
 
 ### 1. Enable TWS API
 
@@ -27,15 +26,28 @@ In TWS: **File > Global Configuration > API > Settings**
 - [x] Socket port: **7496** (live) or **7497** (paper)
 - [x] Allow connections from localhost only
 
-### 2. Install dependencies
+### 2. Download and run
+
+Download this folder, then **double-click `start.bat`**.
+
+The script will:
+1. Check if Python is installed (if not, opens the download page)
+2. Install dependencies automatically (`flask`, `flask-cors`, `ib_insync`)
+3. Launch the bridge
+
+That's it. No terminal commands needed.
+
+### 3. Open TLADe
+
+Go to [tradelikeadealer.com](https://tradelikeadealer.com) — the terminal auto-detects the bridge. You'll see the live data indicator switch on.
+
+## Manual Setup
+
+If you prefer to run manually (or on Mac/Linux):
 
 ```bash
+# Install Python 3.8+ from https://www.python.org/downloads/
 pip install flask flask-cors ib_insync
-```
-
-### 3. Run the bridge
-
-```bash
 python tlade_bridge_lite.py
 ```
 
@@ -50,10 +62,6 @@ You should see:
 [IB] NQ: NQM6
 [IB] ES + NQ streaming
 ```
-
-### 4. Open TLADe
-
-Go to [tradelikeadealer.com](https://tradelikeadealer.com) — the terminal auto-detects the bridge. You'll see the live data indicator switch on.
 
 ## Configuration
 
