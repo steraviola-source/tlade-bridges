@@ -52,11 +52,51 @@ if %errorlevel% neq 0 (
 echo   [OK] Dependencies ready
 echo.
 
-:: ── Launch bridge ──
-echo   Starting bridge...
-echo   Make sure TWS or IB Gateway is running with API enabled on port 7496
+:: ── Load saved config ──
+set CONFIG_FILE=%~dp0.ib_config
+if exist "%CONFIG_FILE%" (
+    echo   [OK] Loading saved configuration...
+    for /f "usebackq tokens=1,* delims==" %%a in ("%CONFIG_FILE%") do (
+        set "%%a=%%b"
+    )
+    echo   TWS Host: %IB_HOST%
+    echo   TWS Port: %IB_PORT%
+    echo   Client ID: %IB_CLIENT%
+    echo.
+    set /p REUSE="   Use these settings? (Y/n): "
+    if /i "%REUSE%"=="n" goto :SETUP
+    goto :LAUNCH
+)
+
+:SETUP
 echo.
 echo   ----------------------------------------
+echo   First-time setup
+echo   ----------------------------------------
+echo.
+echo   Make sure TWS or IB Gateway is running
+echo   with API enabled (File ^> Global Configuration
+echo   ^> API ^> Settings ^> Enable Socket Clients)
+echo.
+
+set IB_HOST=127.0.0.1
+set /p IB_PORT="   TWS API port (7496=live, 7497=paper) [7496]: "
+if "%IB_PORT%"=="" set IB_PORT=7496
+set /p IB_CLIENT="   Client ID (change if other apps use TWS) [10]: "
+if "%IB_CLIENT%"=="" set IB_CLIENT=10
+
+:: Save config
+echo IB_HOST=%IB_HOST%> "%CONFIG_FILE%"
+echo IB_PORT=%IB_PORT%>> "%CONFIG_FILE%"
+echo IB_CLIENT=%IB_CLIENT%>> "%CONFIG_FILE%"
+echo.
+echo   [OK] Configuration saved to .ib_config
+echo.
+
+:LAUNCH
+echo   ----------------------------------------
+echo.
+echo   Starting bridge (TWS %IB_HOST%:%IB_PORT%)...
 echo.
 python "%~dp0tlade_bridge_lite.py"
 
