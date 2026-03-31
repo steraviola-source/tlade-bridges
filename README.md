@@ -23,7 +23,7 @@ Your Broker/Platform  ──>  Bridge (runs locally)  ──>  TLADe Terminal
 |--------|--------|------|----------|
 | [Interactive Brokers](bridges/ib/) | **Ready** | TWS / IB Gateway | Python |
 | [NinjaTrader 8](bridges/ninjatrader/) | **Beta** | Rithmic, CQG, Kinetick (via NT8) | C# + Python |
-| [Rithmic](bridges/rithmic/) | Wanted | R\|Protocol direct | — |
+| [Rithmic](bridges/rithmic/) | **Ready** | R\|Protocol direct (Apex, TopstepTrader, Bulenox, Earn2Trade + 12 other prop firms) | Python |
 | [CQG](bridges/cqg/) | Wanted | CQG API direct | — |
 
 ## Build Your Own Bridge
