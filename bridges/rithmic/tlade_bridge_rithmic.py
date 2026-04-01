@@ -201,9 +201,14 @@ async def rithmic_loop():
 
             print('[Rithmic] Pre-fetch complete. Streaming live ticks...')
 
-            # Keep alive
+            # Keep alive + detect bar shrinkage (reconnect data loss)
+            initial_es_count = len(bars_5min.get('ES', []))
             while connected:
                 await asyncio.sleep(2)
+                current_es = len(bars_5min.get('ES', []))
+                if initial_es_count > 100 and current_es < 100:
+                    print(f'[Rithmic] Bars shrank from {initial_es_count} to {current_es} — reconnecting')
+                    break
 
         except asyncio.TimeoutError:
             print('[Rithmic] Connection timeout')

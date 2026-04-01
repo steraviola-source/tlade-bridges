@@ -116,8 +116,15 @@ def ib_loop():
                 except Exception as e:
                     print(f'[IB] History pre-fetch failed for {sym}: {e}')
 
+            # Track initial bar count to detect post-reconnect shrinkage
+            initial_es_count = len(bars.get('ES') or [])
             while ib.isConnected():
                 ib.sleep(2)
+                # If bars shrank significantly (IB reconnect drops history), force re-subscribe
+                current_es = len(bars.get('ES') or [])
+                if initial_es_count > 100 and current_es < 100:
+                    print(f'[IB] ⚠️ Bars shrank from {initial_es_count} to {current_es} — reconnecting to restore history')
+                    break
 
         except Exception as e:
             print(f'[IB] Error: {e}')
