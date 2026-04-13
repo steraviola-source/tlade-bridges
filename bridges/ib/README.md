@@ -16,9 +16,7 @@ Connect your TWS or IB Gateway to TLADe for real-time ES/NQ data with tick-accur
 - TWS or IB Gateway running with API enabled
 - TLADe subscription
 
-## Quick Start (Windows)
-
-### 1. Enable TWS API
+## Enable TWS API (all platforms)
 
 In TWS: **File > Global Configuration > API > Settings**
 
@@ -26,29 +24,63 @@ In TWS: **File > Global Configuration > API > Settings**
 - [x] Socket port: **7496** (live) or **7497** (paper)
 - [x] Allow connections from localhost only
 
-### 2. Download and run
+Then open TLADe at [tradelikeadealer.com](https://tradelikeadealer.com) — the terminal auto-detects the bridge and switches on the live data indicator.
+
+## Quick Start (Windows)
 
 Download this folder, then **double-click `start.bat`**.
 
 The script will:
 1. Check if Python is installed (if not, opens the download page)
 2. Install dependencies automatically (`flask`, `flask-cors`, `ib_insync`)
-3. Launch the bridge
+3. Prompt for TWS port + client ID on first launch (saves to `.ib_config`)
+4. Launch the bridge
 
 That's it. No terminal commands needed.
 
-### 3. Open TLADe
+## Quick Start (macOS)
 
-Go to [tradelikeadealer.com](https://tradelikeadealer.com) — the terminal auto-detects the bridge. You'll see the live data indicator switch on.
+Download this folder, then **double-click `start.command`**.
 
-## Manual Setup
+The script does the same steps as the Windows `.bat` — Python check, dependency install, config prompt, launch.
 
-If you prefer to run manually (or on Mac/Linux):
+### First-run Gatekeeper block
+
+macOS may block a downloaded `.command` file with:
+> "start.command" cannot be opened because it is from an unidentified developer.
+
+Two ways to unblock:
+
+**Option A — Right-click → Open (one-time)**
+1. In Finder, right-click `start.command` → **Open**
+2. Click **Open** in the warning dialog
+3. macOS will remember this and double-click will work next time
+
+**Option B — Terminal (one-time)**
+```bash
+cd /path/to/bridges/ib
+chmod +x start.command
+xattr -d com.apple.quarantine start.command
+```
+
+Then double-click works normally.
+
+### Python not installed?
+
+If Python 3 is not found, install it with either:
+- Download from [python.org/downloads](https://www.python.org/downloads/)
+- Homebrew: `brew install python3`
+
+Then re-open `start.command`.
+
+## Manual Setup (any platform)
+
+If you prefer a terminal command:
 
 ```bash
-# Install Python 3.8+ from https://www.python.org/downloads/
-pip install flask flask-cors ib_insync
-python tlade_bridge_lite.py
+# Install Python 3.8+ first
+pip3 install flask flask-cors ib_insync
+python3 tlade_bridge_lite.py
 ```
 
 You should see:
@@ -140,11 +172,17 @@ python tlade_bridge_lite.py
    - Try opening `http://localhost:5000/health` in your browser — you should see JSON with `"ib_connected": true`
 3. **HTTPS/Mixed content issue:** If you're on `https://tradelikeadealer.com`, the browser blocks `http://localhost` requests on some configurations. Check console for "Mixed Content" errors.
 
-### Python not found (start.bat)
+### Python not found
 
+**Windows (`start.bat`):**
 - Make sure you checked **"Add Python to PATH"** during Python installation
 - If you installed Python but `start.bat` still can't find it, restart your terminal/PC
 - Or run manually: `C:\Users\YourName\AppData\Local\Programs\Python\Python3x\python.exe tlade_bridge_lite.py`
+
+**macOS (`start.command`):**
+- Install Python from [python.org](https://www.python.org/downloads/) or `brew install python3`
+- Verify with: `python3 --version`
+- Re-open `start.command` after install
 
 ### pip install fails
 
