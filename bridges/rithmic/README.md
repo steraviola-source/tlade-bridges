@@ -23,31 +23,68 @@ If your broker connects through Rithmic, this bridge works.
 - Python 3.8+
 - A TLADe subscription ([tradelikeadealer.com](https://tradelikeadealer.com))
 
-## Setup (PowerShell)
+## Quick Start (Windows)
 
-### 1. Install dependencies
+Download this folder, then **double-click `start.bat`**.
 
-```powershell
-pip install flask flask-cors async_rithmic
+The script will:
+1. Check if Python is installed (if not, opens the download page)
+2. Install dependencies automatically (`flask`, `flask-cors`, `async_rithmic`)
+3. Prompt for your Rithmic credentials + system name + region on first launch (saves to `.rithmic_config`)
+4. Launch the bridge
+
+That's it. No terminal commands needed.
+
+## Quick Start (macOS)
+
+Download this folder, then **double-click `start.command`**.
+
+The script does the same steps as the Windows `.bat` — Python check, dependency install, credentials prompt, launch. Your password is hidden as you type.
+
+### First-run Gatekeeper block
+
+macOS may block a downloaded `.command` file with:
+> "start.command" cannot be opened because it is from an unidentified developer.
+
+Two ways to unblock:
+
+**Option A — Right-click → Open (one-time)**
+1. In Finder, right-click `start.command` → **Open**
+2. Click **Open** in the warning dialog
+
+**Option B — Terminal (one-time)**
+```bash
+cd /path/to/bridges/rithmic
+chmod +x start.command
+xattr -d com.apple.quarantine start.command
 ```
 
-### 2. Set your credentials
+### Python not installed?
 
-```powershell
-$env:RITHMIC_USER = "your_username"
-$env:RITHMIC_PASS = "your_password"
-$env:RITHMIC_SYSTEM = "your_system"
+- Download from [python.org/downloads](https://www.python.org/downloads/), or
+- Homebrew: `brew install python3`
+
+Then re-open `start.command`.
+
+## Manual Setup (any platform)
+
+If you prefer a terminal command:
+
+```bash
+# Install Python 3.8+ first
+pip3 install flask flask-cors async_rithmic
+
+# Set your credentials (PowerShell: use $env:VAR = "value")
+export RITHMIC_USER="your_username"
+export RITHMIC_PASS="your_password"
+export RITHMIC_SYSTEM="Apex"   # or your broker's system name
+
+python3 tlade_bridge_rithmic.py
 ```
 
 `RITHMIC_SYSTEM` is the system name from your broker (e.g. `Apex`, `TopstepTrader`, `Rithmic 01`, etc.).
 
-### 3. Run the bridge
-
-```powershell
-python tlade_bridge_rithmic.py
-```
-
-### 4. Open TLADe
+## Open TLADe
 
 The terminal auto-detects the bridge on `localhost:5000`. You'll see the live indicator switch on.
 
