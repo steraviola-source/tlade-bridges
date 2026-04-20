@@ -259,6 +259,7 @@ def ib_data():
         price = live_prices.get(sym)
 
         if not all_bars and cur is None:
+            print(f'[Rithmic] /ib_data {sym}: no data yet (404)')
             return jsonify({'error': f'No data for {sym}'}), 404
 
         # Combine completed bars + current building bar
@@ -276,6 +277,7 @@ def ib_data():
         if price is None and closes:
             price = closes[-1]
 
+    print(f'[Rithmic] /ib_data {sym}: {len(combined)} bars, last={price}')
     return jsonify({
         'chart_data': {
             'time': times, 'open': opens, 'high': highs,
@@ -291,7 +293,9 @@ def ib_daily():
     ticker = request.args.get('ticker', 'ES').upper()
     sym = 'NQ' if 'NQ' in ticker else 'ES'
     if sym in _daily_cache and _daily_cache[sym].get('data'):
+        print(f'[Rithmic] /ib_daily {sym}: served {len(_daily_cache[sym]["data"])} daily bars (cached)')
         return jsonify({'data': _daily_cache[sym]['data'], 'instrument': sym, 'cached': True})
+    print(f'[Rithmic] /ib_daily {sym}: not yet available (503)')
     return jsonify({'error': 'Daily data not yet available'}), 503
 
 
@@ -300,7 +304,9 @@ def ib_history():
     ticker = request.args.get('ticker', 'ES').upper()
     sym = 'NQ' if 'NQ' in ticker else 'ES'
     if sym in _history_cache and _history_cache[sym].get('data'):
+        print(f'[Rithmic] /ib_history {sym}: served {len(_history_cache[sym]["data"])} history bars (cached)')
         return jsonify({'data': _history_cache[sym]['data'], 'instrument': sym, 'cached': True})
+    print(f'[Rithmic] /ib_history {sym}: not yet available (503)')
     return jsonify({'error': 'History data not yet available'}), 503
 
 

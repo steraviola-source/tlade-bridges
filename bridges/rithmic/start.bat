@@ -2,7 +2,7 @@
 title TLADe Bridge - Rithmic
 echo.
 echo   ========================================
-echo    TLADe Bridge - Rithmic (R|Protocol)
+echo    TLADe Bridge - Rithmic
 echo   ========================================
 echo.
 
