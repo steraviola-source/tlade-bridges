@@ -1,0 +1,16 @@
+# Local bridge config files (contain user credentials in plaintext)
+.rithmic_config
+.ib_config
+.nt8_config
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store

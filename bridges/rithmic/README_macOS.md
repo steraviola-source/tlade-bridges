@@ -78,6 +78,25 @@ python3 --version
 
 This is the **#1 most common error**. Cause: another app is using your Rithmic Market Data session. Close any other Rithmic-connected application. Only one Market Data session at a time is allowed per account.
 
+### `You must specify valid SYSTEM_NAME in the credentials: ['Rithmic Test']`
+
+This error is **almost always a region mismatch**, not a credential problem. Rithmic provisions accounts on a specific regional cluster (EU or US). If you pick the wrong region during setup, the gateway you connect to doesn't have your account on its allow-list and returns this misleading message.
+
+**Fix in 30 seconds:**
+
+1. Stop the bridge (Ctrl+C in the Terminal window, or close it)
+2. In Finder, open the bridge folder and **delete the file `.rithmic_config`**
+   - File hidden? Press `Cmd+Shift+.` to toggle hidden files
+3. Right-click `start.command` → **Open** to relaunch
+4. Re-enter your Rithmic credentials
+5. When asked **"Region - (E)urope or (U)S? [E]:"**, **try the OTHER region** from what you picked last time
+   - Most Apex / Topstep / Bulenox accounts are routed via **Europe** — pick `e`
+   - If you already tried Europe and it failed, then try `u`
+
+You should see `[Rithmic] Connected!` followed by ES + NQ streaming.
+
+If both regions return the same `['Rithmic Test']` error, your account is genuinely restricted server-side — open a ticket with your prop firm support attaching this README section.
+
 ### Wrong credentials
 
 Double-check username, password, and system name (case-sensitive, must match exactly what your broker provides).

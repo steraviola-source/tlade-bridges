@@ -74,6 +74,25 @@ This is the **#1 most common error**. Cause: another app is using your Rithmic M
 
 Then re-launch the bridge.
 
+### `You must specify valid SYSTEM_NAME in the credentials: ['Rithmic Test']`
+
+This error is **almost always a region mismatch**, not a credential problem. Rithmic provisions accounts on a specific regional cluster (EU or US). If you pick the wrong region during setup, the gateway you connect to doesn't have your account on its allow-list and returns this misleading message.
+
+**Fix in 30 seconds:**
+
+1. Stop the bridge (Ctrl+C in the Command Prompt window, or close it)
+2. In File Explorer, open the bridge folder and **delete the file `.rithmic_config`**
+   - File hidden? In Explorer: View → Show → Hidden items
+3. Double-click `start.bat` to relaunch
+4. Re-enter your Rithmic credentials
+5. When asked **"Region - (E)urope or (U)S? [E]:"**, **try the OTHER region** from what you picked last time
+   - Most Apex / Topstep / Bulenox accounts are routed via **Europe** — pick `e`
+   - If you already tried Europe and it failed, then try `u`
+
+You should see `[Rithmic] Connected!` followed by ES + NQ streaming.
+
+If both regions return the same `['Rithmic Test']` error, your account is genuinely restricted server-side — open a ticket with your prop firm support attaching this README section.
+
 ### Wrong credentials
 
 Double-check username, password, and system name. The system name must match **exactly** what your broker provides — e.g., `Apex` not `apex`, `TopstepTrader` not `Topstep`.

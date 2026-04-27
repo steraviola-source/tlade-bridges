@@ -82,7 +82,10 @@ echo     ThriveTrading, Rithmic 01, Rithmic Paper Trading
 echo.
 
 set /p RITHMIC_USER="   Rithmic User ID: "
-set /p RITHMIC_PASS="   Rithmic Password: "
+
+:: Password — silent input (no echo, no log) via PowerShell prompt
+for /f "delims=" %%p in ('powershell -NoProfile -Command "$p=Read-Host '   Rithmic Password' -AsSecureString; [System.Net.NetworkCredential]::new('',$p).Password"') do set "RITHMIC_PASS=%%p"
+
 set /p RITHMIC_SYSTEM="   System name (e.g. Apex): "
 
 :: Optional: gateway
