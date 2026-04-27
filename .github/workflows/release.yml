@@ -1,0 +1,60 @@
+name: Build & Release Bridges
+
+# Trigger on every push to main + manual run from Actions tab.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build per-bridge zips
+        run: |
+          set -e
+          mkdir -p pkg
+          # Copy each bridge into a self-explanatory folder name so users see
+          # a clean "TLADe-X-Bridge/" after extracting (no nested path).
+          cp -r bridges/ib            pkg/TLADe-IB-Bridge
+          cp -r bridges/rithmic       pkg/TLADe-Rithmic-Bridge
+          cp -r bridges/ninjatrader   pkg/TLADe-NT8-Bridge
+          cd pkg
+          zip -r ../TLADe-IB-Bridge.zip      TLADe-IB-Bridge
+          zip -r ../TLADe-Rithmic-Bridge.zip TLADe-Rithmic-Bridge
+          zip -r ../TLADe-NT8-Bridge.zip     TLADe-NT8-Bridge
+          cd ..
+          ls -la *.zip
+
+      - name: Publish to "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Bridges
+          body: |
+            Per-bridge installer bundles, auto-built on every commit to `main`.
+
+            Each zip extracts into a single self-contained folder with
+            `start.bat` (Windows) and `start.command` (macOS, where applicable)
+            at the top — no nested directories, no irrelevant files.
+
+            | Bridge | Download |
+            |---|---|
+            | Interactive Brokers | `TLADe-IB-Bridge.zip` |
+            | Rithmic (Apex / TopstepTrader / Bulenox / 12+ prop firms) | `TLADe-Rithmic-Bridge.zip` |
+            | NinjaTrader 8 | `TLADe-NT8-Bridge.zip` |
+
+            Source: `bridges/<feed>/` in the repo. Pick the feed you use,
+            download the matching zip, "Extract All", run `start.bat`.
+          files: |
+            TLADe-IB-Bridge.zip
+            TLADe-Rithmic-Bridge.zip
+            TLADe-NT8-Bridge.zip
+          make_latest: true
+          fail_on_unmatched_files: true
