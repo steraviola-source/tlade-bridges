@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build per-bridge zips
+      - name: Build per-bridge zips + all-in-one fallback
         run: |
           set -e
           mkdir -p pkg
@@ -29,6 +29,17 @@ jobs:
           zip -r ../TLADe-IB-Bridge.zip      TLADe-IB-Bridge
           zip -r ../TLADe-Rithmic-Bridge.zip TLADe-Rithmic-Bridge
           zip -r ../TLADe-NT8-Bridge.zip     TLADe-NT8-Bridge
+          cd ..
+          # All-in-one bundle (for legacy bookmarks pointing to the previous
+          # main.zip pattern, and for users who want every bridge at once).
+          mkdir -p pkg-all/TLADe-AllBridges
+          cp -r bridges     pkg-all/TLADe-AllBridges/
+          cp -r protocol    pkg-all/TLADe-AllBridges/
+          cp -r templates   pkg-all/TLADe-AllBridges/
+          cp README.md      pkg-all/TLADe-AllBridges/
+          cp LICENSE        pkg-all/TLADe-AllBridges/
+          cd pkg-all
+          zip -r ../TLADe-AllBridges.zip TLADe-AllBridges
           cd ..
           ls -la *.zip
 
@@ -49,6 +60,7 @@ jobs:
             | Interactive Brokers | `TLADe-IB-Bridge.zip` |
             | Rithmic (Apex / TopstepTrader / Bulenox / 12+ prop firms) | `TLADe-Rithmic-Bridge.zip` |
             | NinjaTrader 8 | `TLADe-NT8-Bridge.zip` |
+            | All bridges (full bundle, fallback) | `TLADe-AllBridges.zip` |
 
             Source: `bridges/<feed>/` in the repo. Pick the feed you use,
             download the matching zip, "Extract All", run `start.bat`.
@@ -56,5 +68,6 @@ jobs:
             TLADe-IB-Bridge.zip
             TLADe-Rithmic-Bridge.zip
             TLADe-NT8-Bridge.zip
+            TLADe-AllBridges.zip
           make_latest: true
           fail_on_unmatched_files: true
