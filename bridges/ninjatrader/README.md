@@ -14,9 +14,11 @@ Connect NinjaTrader 8 to TLADe for real-time ES/NQ data. Feed-agnostic — works
 Your Feed (Rithmic/CQG/Kinetick)
   └── NinjaTrader 8
         └── TLAdeBridge.cs (NT8 indicator, pushes ticks via HTTP POST)
-              └── tlade_bridge_nt8.py (Python receiver on port 8765)
+              └── tlade_bridge_nt8.py (Python receiver on port 5000)
                     └── TLADe Terminal (auto-detects on localhost:5000)
 ```
+
+The receiver speaks the standard [Bridge Protocol](../../protocol/BRIDGE_SPEC.md) on port 5000, exposing `/health` and `/ib_data` to the terminal and `/push_spot` for the NT8 indicator.
 
 ## Requirements
 
@@ -52,7 +54,7 @@ The terminal auto-detects the bridge on localhost.
 
 ## Status
 
-**Beta** — validated with NT8 Simulated Feed. Tested with live data feeds pending (needs funded AMP account with Rithmic or CQG).
+**Beta** — validated with NT8 Simulated Feed. Spot-only path: NT8 sends individual ticks (no bar history), so the terminal uses its own candle source for the chart while spot updates flow live from NT8. Tested with live data feeds pending (needs funded AMP account with Rithmic or CQG).
 
 ## Contributing
 

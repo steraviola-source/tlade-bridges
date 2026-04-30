@@ -20,7 +20,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             if (State == State.SetDefaults)
             {
-                Description = "TLADe local data bridge — pusha tick ES/NQ a localhost:8765";
+                Description = "TLADe local data bridge — pushes ES/NQ ticks to localhost:5000";
                 Name        = "TLAdeBridge";
                 Calculate   = Calculate.OnEachTick;
                 IsOverlay   = true;
@@ -43,9 +43,10 @@ namespace NinjaTrader.NinjaScript.Indicators
             lastPostedPrice = price;
             lastPostTime    = now;
 
-            // Ticker mapping: NQ → NDX, tutto il resto (ES) → SPX
+            // Pass futures symbol (ES/NQ) — the receiver and TLADe terminal both
+            // expect ES/NQ. The receiver normalizes any other input to ES/NQ.
             string sym    = Instrument.MasterInstrument.Name;
-            string ticker = sym.StartsWith("NQ") ? "NDX" : "SPX";
+            string ticker = sym.StartsWith("NQ") ? "NQ" : "ES";
 
             Print($"[TLAdeBridge] Posting {ticker} {price}...");
             Task.Run(() => PostSpot(ticker, price, now));
@@ -57,12 +58,12 @@ namespace NinjaTrader.NinjaScript.Indicators
             {
                 string payload = $"{{\"ticker\":\"{ticker}\",\"spot\":{price.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"ts\":\"{ts:O}\"}}";
                 var content    = new StringContent(payload, Encoding.UTF8, "application/json");
-                var response   = await httpClient.PostAsync("http://localhost:8765/push_spot", content);
+                var response   = await httpClient.PostAsync("http://localhost:5000/push_spot", content);
                 Print($"[TLAdeBridge] {ticker} {price} → {(response.IsSuccessStatusCode ? "OK" : "FAIL")}");
             }
             catch (Exception ex)
             {
-                Print($"[TLAdeBridge] Errore POST: {ex.Message}");
+                Print($"[TLAdeBridge] POST error: {ex.Message}");
             }
         }
     }
