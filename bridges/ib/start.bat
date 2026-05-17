@@ -31,12 +31,12 @@ echo.
 echo   Checking dependencies...
 python -c "import flask" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo   Installing flask, flask-cors, ib_insync...
-    pip install flask flask-cors ib_insync
+    echo   Installing flask, flask-cors, ib_insync, tzdata...
+    pip install flask flask-cors ib_insync tzdata
     if %errorlevel% neq 0 (
         echo.
         echo   [!] pip install failed. Try manually:
-        echo       pip install flask flask-cors ib_insync
+        echo       pip install flask flask-cors ib_insync tzdata
         echo.
         pause
         exit /b 1
@@ -48,6 +48,13 @@ if %errorlevel% neq 0 (
         echo   Installing ib_insync...
         pip install ib_insync
     )
+)
+:: tzdata — required on Windows for IANA Olson zones (IB returns "US/Central"
+:: for CME contracts; without tzdata ib_insync crashes on bar timestamp parse).
+python -c "import tzdata" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo   Installing tzdata...
+    pip install tzdata
 )
 echo   [OK] Dependencies ready
 echo.
