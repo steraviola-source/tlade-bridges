@@ -52,6 +52,21 @@ python tlade_bridge_nt8.py
 
 The terminal auto-detects the bridge on localhost.
 
+## FAQ
+
+### Why does the indicator appear to only work on one chart when I add it to two?
+
+By design — the TLAdeBridge indicator is a *spot-tick publisher*, not a chart
+visualiser. It forwards each tick from NinjaTrader to the local bridge on
+port 5000. Adding it to a second chart doesn't open a second data channel:
+both instances post to the same `/push_spot` endpoint, so the receiver keeps
+only the latest tick and the second instance looks idle by comparison.
+
+You only need the indicator loaded on **one chart per ticker** (one for ES,
+one for NQ). The timeframe of that NT8 chart (1m, 5m, tick…) doesn't affect
+what TLADe receives — multi-timeframe analysis happens inside the TLADe
+terminal itself via the built-in 5m / 15m / 30m / H1 / H4 switcher.
+
 ## Status
 
 **Beta** — validated with NT8 Simulated Feed. Spot-only path: NT8 sends individual ticks (no bar history), so the terminal uses its own candle source for the chart while spot updates flow live from NT8. Tested with live data feeds pending (needs funded AMP account with Rithmic or CQG).
