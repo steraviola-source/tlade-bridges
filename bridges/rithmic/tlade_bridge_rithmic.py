@@ -30,6 +30,16 @@ BAR_SECONDS = 300  # 5 minutes
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+# Chrome Private Network Access (PNA) — required so public HTTPS origins
+# like tradelikeadealer.com can fetch from this localhost server. Without
+# this header Chrome blocks the request with:
+#   "Permission was denied for this request to access the `loopback`
+#    address space."
+@app.after_request
+def _allow_private_network(resp):
+    resp.headers['Access-Control-Allow-Private-Network'] = 'true'
+    return resp
+
 # ── DNS Patch (many ISPs break rithmic.com resolution) ──
 _original_getaddrinfo = socket.getaddrinfo
 def _patched_getaddrinfo(host, port, *args, **kwargs):

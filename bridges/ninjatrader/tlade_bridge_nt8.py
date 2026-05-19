@@ -33,6 +33,16 @@ HEARTBEAT_WINDOW_S = 15  # tick is "fresh" if received within this window
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+# Chrome Private Network Access (PNA) — required so public HTTPS origins
+# like tradelikeadealer.com can fetch from this localhost server. Without
+# this header Chrome blocks the request with:
+#   "Permission was denied for this request to access the `loopback`
+#    address space."
+@app.after_request
+def _allow_private_network(resp):
+    resp.headers['Access-Control-Allow-Private-Network'] = 'true'
+    return resp
+
 _lock = Lock()
 _ticks = {}  # { "ES": {"price": float, "ts": str, "received_at": datetime}, ... }
 
