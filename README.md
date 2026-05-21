@@ -24,6 +24,7 @@ Your Broker/Platform  ──>  Bridge (runs locally)  ──>  TLADe Terminal
 | [Interactive Brokers](bridges/ib/) | **Ready** | TWS / IB Gateway | Python |
 | [NinjaTrader 8](bridges/ninjatrader/) | **Beta** | Rithmic, CQG, Kinetick (via NT8) | C# + Python |
 | [Rithmic](bridges/rithmic/) | **Ready** | R\|Protocol direct (Apex, TopstepTrader, Bulenox, Earn2Trade + 12 other prop firms) | Python |
+| [ATAS](bridges/atas/) | **Ready** | Rithmic / CQG via ATAS Platform — ships 3 indicators (Bridge + GEX Dashboard + Quantum Field Ladder) | C# + Python |
 | [CQG](bridges/cqg/) | Wanted | CQG API direct | — |
 
 ## Build Your Own Bridge

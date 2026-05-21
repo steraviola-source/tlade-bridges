@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWpf>true</UseWpf>
+    <AssemblyName>TLAdeBridgeATAS</AssemblyName>
+    <RootNamespace>ATAS.Indicators.Technical</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="tlade-bridges-main\**\*.cs" />
+    <Compile Remove="Other platforms engines\**\*.cs" />
+    <Compile Remove="bin\**\*.cs" />
+    <Compile Remove="obj\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="ATAS.Indicators">
+      <HintPath>C:\Program Files (x86)\ATAS Platform\ATAS.Indicators.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ATAS.Indicators.Technical">
+      <HintPath>C:\Program Files (x86)\ATAS Platform\ATAS.Indicators.Technical.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ATAS.Indicators.Other">
+      <HintPath>C:\Program Files (x86)\ATAS Platform\ATAS.Indicators.Other.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ATAS.DataFeedsCore">
+      <HintPath>C:\Program Files (x86)\ATAS Platform\ATAS.DataFeedsCore.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ATAS.Types">
+      <HintPath>C:\Program Files (x86)\ATAS Platform\ATAS.Types.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.Rendering">
+      <HintPath>C:\Program Files (x86)\ATAS Platform\OFT.Rendering.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.Core">
+      <HintPath>C:\Program Files (x86)\ATAS Platform\OFT.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.Attributes">
+      <HintPath>C:\Program Files (x86)\ATAS Platform\OFT.Attributes.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Copiaza DLL-ul compilat direct in folderul ATAS Scripts -->
+  <Target Name="CopyToATAS" AfterTargets="Build">
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll"
+          DestinationFolder="$(USERPROFILE)\Documents\ATAS\Scripts"
+          OverwriteReadOnlyFiles="true" />
+  </Target>
+
+</Project>

@@ -1,0 +1,282 @@
+# TLADe Bridge ATAS
+
+> **Credits.** ATAS-side end-to-end integration contributed by **[Mihai Ostafe](mailto:mihaiostafe@gmail.com)** — three indicators, Python receiver, autostart workflow, this README. Reviewed, tested and published by the TLADe team.
+> Released under the **MIT License** — see SPDX headers in each source file.
+
+ATAS-side integration with the TLADe / TradeLikeaDealer ecosystem.
+One DLL (`TLAdeBridgeATAS.dll`) ships three indicators:
+
+1. **TLADe Bridge** — pushes live price / bar / delta from ATAS to a local Python bridge that the TLADe Terminal listens to.
+2. **TLADe GEX Dashboard** — pulls Gamma Exposure walls and system levels directly from the TLADe Cloud and draws them as horizontal lines on the chart.
+3. **TLADe Quantum Field Ladder** — draws Zero-Gamma and Call / Put-Wall levels as gradient force-field bands.
+
+All three live in the single all-in-one `TLAdeBridgeATAS.dll`, built from the `TLAdeBridgeATAS.csproj` in this directory.
+
+## v3.0.1 — Strike normalization fix
+
+The cloud `indicatorData` endpoint already returns strikes in the futures price space (ES for the SPX family, NQ for the NDX family). v3.0.0 was double-applying the spread (`rawStrike - EffectiveEsSpread`), causing levels to appear ~19 points below the TLADe Terminal on ES. v3.0.1 uses the strikes as-is. If you ever see a constant offset between ATAS and the terminal on a future Mother-side change, the indicator still exposes the `Manual spread override` setting (use a tiny positive value like `0.001` to bypass conversion entirely).
+
+---
+
+## Architecture
+
+```
+Rithmic / CQG market data
+        │
+        ▼
+   ATAS Platform
+        │
+        │  (chart indicators load from %APPDATA%\ATAS\Indicators\TLAdeBridgeATAS.dll)
+        │
+        ├── TLADe Bridge indicator  ─── HTTP POST ──▶  tlade_bridge_atas.py (Flask, localhost:5000)
+        │                                                       │
+        │                                                       ▼
+        │                                               TLADe Terminal (auto-detects bridge)
+        │
+        ├── TLADe GEX Dashboard     ───────HTTPS────▶  https://europe-west1-omggex.cloudfunctions.net/indicatorData
+        │
+        └── TLADe Quantum Field Ladder ────HTTPS────▶  same cloud endpoint
+```
+
+The local Python bridge (`tlade_bridge_atas.py`) is needed only for the **Bridge** indicator's terminal integration. The two visual indicators (GEX Dashboard, Quantum Field Ladder) fetch directly from the cloud and do not depend on the bridge.
+
+---
+
+## Prerequisites
+
+- ATAS Platform installed at `C:\Program Files (x86)\ATAS Platform\`
+- .NET 10 SDK (the project targets `net10.0-windows`)
+- Python 3.8+ on PATH (only if you use the Bridge indicator)
+- A TLADe API key (free or paid). Free mode also works but data is delayed by 3 days.
+
+---
+
+## Build & Install
+
+From the project directory:
+
+```powershell
+dotnet build TLAdeBridgeATAS.csproj -c Release
+```
+
+The build target copies the DLL to `%USERPROFILE%\Documents\ATAS\Scripts\` automatically, but ATAS loads indicators from a different folder. **Always copy the DLL to the load folder manually:**
+
+```powershell
+Copy-Item "$env:USERPROFILE\Documents\ATAS\Scripts\TLAdeBridgeATAS.dll" `
+          "$env:APPDATA\ATAS\Indicators\TLAdeBridgeATAS.dll" -Force
+```
+
+> **Important:** ATAS keeps the DLL locked in memory once any chart loads an indicator from it. You **must close ATAS completely** before overwriting the file, otherwise the copy will fail or, worse, ATAS will hang mid-session. Workflow:
+> 1. `dotnet build -c Release` (safe; writes to `bin\Release\`)
+> 2. Close ATAS (File → Exit)
+> 3. Copy DLL to `%APPDATA%\ATAS\Indicators\`
+> 4. Re-open ATAS, add the indicator fresh
+
+---
+
+## API Key Setup
+
+Both visual indicators auto-load the TLADe API key from either:
+
+- `%USERPROFILE%\Documents\ATAS\tlade_apikey.txt`
+- `%APPDATA%\ATAS\tlade_apikey.txt`
+
+Create one of those files with just the key inside (single line, no quotes). With a key, you get live data; without, indicators fall back to `mode=free` (3-day delayed).
+
+You can also paste the key directly into each indicator's settings (`1. Source → API Key`), but the file is more convenient if you re-add the indicator often.
+
+---
+
+## Starting the Local Bridge
+
+Required only for the **TLADe Bridge** indicator (price push to TLADe Terminal).
+
+```cmd
+start.bat
+```
+
+That checks Python / `flask` / `flask-cors`, verifies port 5000 is free, and runs `python tlade_bridge_atas.py`. Leave the window open while trading.
+
+**Auto-start on logon** (already configured): there's a shortcut at
+`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\TLADe Bridge ATAS.lnk`
+pointing to `start.bat`. Delete the shortcut to disable autostart.
+
+---
+
+## Indicator 1 — TLADe Bridge
+
+**Purpose:** Streams ATAS market data (live price, M5 bars, daily bars, delta, bid/ask volume) to the local Python bridge over HTTP, where the TLADe Terminal picks it up.
+
+**Add to chart:** Indicators → search "TLADe Bridge". Add **one** instance per chart only.
+
+**Endpoints used:**
+
+| Endpoint | Direction | Purpose |
+|---|---|---|
+| `POST /push_spot` | ATAS → bridge | Live tick (throttled ~2s) |
+| `POST /push_bar` | ATAS → bridge | Closed M5 bar (OHLCV + delta + bid/ask vol) |
+| `POST /push_daily` | ATAS → bridge | Daily bar (D1) at session rollover |
+| `GET /health` | terminal → bridge | Liveness |
+| `GET /ib_data?ticker=ES` | terminal → bridge | Real-time chart data |
+
+**Ticker normalization:** any symbol containing `NQ` / `NDX` / `MNQ` is mapped to `NQ`; everything else to `ES`.
+
+**Settings of note:**
+- *Port* — must be `5000` (TLADe Terminal hardcodes this).
+- *Throttle ms* — minimum interval between spot pushes (default 2000ms).
+
+**Log:** `%USERPROFILE%\Documents\ATAS\tlade_bridge.log`
+
+---
+
+## Indicator 2 — TLADe GEX Dashboard
+
+**Purpose:** Draws GEX walls (CW = Call Wall, PW = Put Wall) and system levels (ZG = Zero Gamma, MP = Max Pain, EH/EL = Expected Move High/Low, VH/VL = Volatility Bands, PDH/PDL/PWH/PWL = previous session structure) as horizontal lines on the chart, refreshed automatically.
+
+**Auto-refresh schedule (ET):** 18:05, 02:05, 08:05, 09:35, 10:35, 13:05 — six fetches per day matching the TLADe NT8 reference. Plus one fetch the first time the indicator is added to the chart.
+
+### Key Settings
+
+**Group "1. Source"**
+
+| Setting | Purpose |
+|---|---|
+| API Key | Your TLADe key (auto-loaded from file if present) |
+| Auto-fetch din TLADe Cloud | Default ON. OFF disables scheduled fetches. |
+| Manual data string (override) | Paste a full `S:…\|L:…\|P:…` string to override the cloud. While non-empty, auto-fetch is ignored. Compose the string in Notepad and paste in one go — typing keystroke-by-keystroke wastes CPU and used to wipe levels (defensive parse prevents that now). |
+
+**Group "2. Layout"**
+
+| Setting | Purpose |
+|---|---|
+| Ticker display | `auto` (detect from chart instrument), `ES`, `SPX`, `SPY`, `NQ`, `NDX`, `QQQ`. Set to `SPX` if you want labels to match what TLADe Terminal shows (raw SPX strikes); set to `ES` to convert SPX strikes to ES futures coordinates. |
+| ES↔SPX spread (auto from S:) | Spread read from the `S:` header in the cloud response. Used when ticker is `ES`. |
+| NQ↔NDX spread | Default 40. Used when ticker is `NQ`. |
+| Manual spread override (0 = auto) | If > 0, this value replaces the auto-detected spread. Use this to dial in an exact match against TLADe Terminal. |
+| Snap la tick-ul instrumentului | Default ON. Rounds levels to the chart's tick grid (e.g. 0.25 for ES) so lines land cleanly between price ticks. |
+
+**Group "3. Visibility"**
+
+Toggles for each level family (GEX walls, system, structure), plus labels, axis markers, and the status badge.
+
+**Group "4. Filter"**
+
+| Setting | Purpose |
+|---|---|
+| Max GEX walls | How many CW/PW lines to draw. `999` = all. Half above spot, half below. The closest wall to spot above and below is always drawn ("protected"). |
+| Enable threshold filter | When ON, walls with magnitude under the threshold are hidden. |
+| Threshold magnitude (M) | The cutoff in millions of GEX. |
+
+**Group "5. Style"**
+
+| Setting | Purpose |
+|---|---|
+| Line width GEX | Thickness for walls. |
+| Line width System/ZG/MP | Thickness for system levels (usually thicker). |
+| Font size label | Label text size. |
+| Scale wall lines by magnitude | Default ON. CW/PW lines have variable length anchored to the right edge; line length is proportional to magnitude. System lines remain full width. |
+| Wall line max width (% chart) | Upper bound of the scaled wall length. |
+| Wall line min width (% chart) | Lower bound — even the smallest wall is at least this long. |
+| Label text inherits line color | Default ON. OFF lets you force a single text color (useful when red labels are hard to read on your background). |
+| Label text color (when not inheriting) | The override color. |
+| Label background opacity (0-255) | Label background alpha. |
+| Differentiate label background above/below spot | OFF: background is derived from the line color (dimmed). ON: levels above spot use `LabelBgAbove`, below spot use `LabelBgBelow`. |
+| Label background - above spot | Default bright red `#dc2626`. |
+| Label background - below spot | Default bright green `#16a34a`. |
+
+**Status badge:** the top-left badge shows `TLADe GEX [LIVE\|FREE] levels=N`. Confirms data mode and level count.
+
+**Log:** `%USERPROFILE%\Documents\ATAS\tlade_gex.log` — every fetch, parse, and OnRender error is recorded.
+
+---
+
+## Indicator 3 — TLADe Quantum Field Ladder
+
+**Purpose:** Same data source as GEX Dashboard, but renders levels as **gradient force-field bands** instead of lines. Cyan bands = ZG (magnet), magenta bands = CW/PW (walls). Band intensity scales with GEX magnitude.
+
+Only ZG / CW / PW are rendered — system levels and structure are omitted (use the GEX Dashboard for those).
+
+### Key Settings
+
+**Group "2. Layout"**
+
+Same conversion controls as GEX Dashboard (Ticker, spreads, snap, manual override).
+
+**Group "3. Render"**
+
+| Setting | Purpose |
+|---|---|
+| Max levels | How many bands to draw, ranked by distance to spot. |
+| Band width (ticks) | Total band thickness in chart ticks. |
+| Gradient layers | How many concentric strips form each band (odd 3–11). More = smoother gradient. |
+| Center line width | Thickness of the bold center line. |
+| Benzi sub lumanari (chart in prim-plan) | Default ON. Bands render on the `Historical` layer (under candles); the center line and label always render on `Final` (over candles). OFF puts everything over candles — Quantum in foreground. |
+| Show labels | Show the `<price> MAGNET\|WALL` label per band. |
+| Show status badge | The top-left mode/count badge. |
+| Font size label | Label text size. |
+
+**Group "4. Colors"**
+
+- `Magnet color (ZG)` — default cyan.
+- `Wall color (CW/PW)` — default magenta.
+- Label text inheritance, override color, background alpha, and positional above/below background — same semantics as on the GEX Dashboard.
+
+**Log:** `%USERPROFILE%\Documents\ATAS\tlade_quantum.log`
+
+---
+
+## Troubleshooting
+
+**"Indicator added but nothing draws."**
+Check the log file for the indicator (`tlade_gex.log` / `tlade_quantum.log`). Look for the most recent `PARSED levels=N` line; if N > 0 the data is fine and the issue is rendering. Verify:
+- The chart instrument matches a supported scale (see "Ticker display" setting).
+- Threshold filter isn't hiding everything (try OFF).
+- `MaxGexLevels` isn't set absurdly low.
+- The DLL in `%APPDATA%\ATAS\Indicators\` is actually the latest build (check timestamp).
+
+**"OnRender ERR" or "OnCalculate EX" in the log.**
+Read the full exception. Common cause: chart not yet fully initialized (`ChartInfo == null`) — the code already guards against this; a transient error during chart switching is usually harmless.
+
+**"FETCH … HTTP 401/403."**
+API key invalid or rate-limited. Verify `Documents\ATAS\tlade_apikey.txt` contents.
+
+**"FETCH … HTTP 200 bytes=0."**
+Cloud temporarily empty. Wait for the next scheduled fetch or trigger a refresh by toggling any setting on the indicator.
+
+**Lines visible but at wrong price.**
+The `Ticker display` setting is mismatched with your chart instrument. With `auto`, the code looks at `InstrumentInfo.Instrument` and picks NQ/NDX/QQQ when the name contains `NQ`/`NDX`/`MNQ`, otherwise ES family. Override manually if needed.
+
+**Labels match TLADe Terminal but with a small fractional offset (~0.13–0.46).**
+The cloud returns integer strikes (e.g. 7383). TLADe Terminal applies a per-strike basis adjustment we can't reproduce exactly without their option-chain data feed. The closest match is `Ticker display = SPX` with the snap option enabled — your values will be within 0.5 of TLADe Terminal.
+
+**ATAS hangs after a DLL replace.**
+You almost certainly copied the DLL while ATAS was running. Kill ATAS via Task Manager, then re-copy with ATAS fully closed.
+
+---
+
+## File Reference
+
+| File | Role |
+|---|---|
+| `TLAdeBridgeATAS.cs` | Bridge indicator source (push to local Python). |
+| `TLAdeGexDashboardATAS.cs` | GEX Dashboard source. |
+| `TLAdeQuantumFieldLadder.cs` | Quantum Field Ladder source. |
+| `TLAdeBridgeATAS.csproj` | Single project that builds all three into one DLL. |
+| `tlade_bridge_atas.py` | Local Flask receiver (port 5000) and `/get_levels` / `/ib_data` server. |
+| `tlade_auto_fetch.py` | Optional helper that pulls GEX into the bridge. |
+| `tlade_push_levels.py` | Optional helper to manually push level data into the bridge. |
+| `start.bat` | Launches the bridge, checks Python and dependencies. |
+| `Other platforms engines/Trading view/` | Pine source and screenshots from the original TradingView indicator (reference only). |
+| `Other platforms engines/TLADeGexDashboardNinja Trader/` | NT8 reference port. |
+| `tlade-bridges-main/BRIDGE_SPEC.md` | The TLADe bridge HTTP protocol spec. |
+| `AI_NOTES.md` | Working notes on ATAS Bridge internals, port choices, threading model, and known bugs. |
+
+---
+
+## Versions
+
+- Bridge indicator: v2.4.x (Channel-based worker, dedup via `ConcurrentDictionary`).
+- GEX Dashboard: v3.0.0 (OnRender-based, post-LineSeries rewrite).
+- Quantum Field Ladder: v3.0.0 (OnRender-based, multi-layer gradient via `FillRectangle`).
+
+The `v3.0` rewrite of the two visual indicators replaced the `LineSeries.Add()` approach (which silently failed to render) with `EnableCustomDrawing` + `SubscribeToDrawingEvents(DrawingLayouts.Final)` + a real `OnRender` override. Reference pattern: `D:\Automatizare Atas\Cornel\ESStrategy_Dalton.cs`.
