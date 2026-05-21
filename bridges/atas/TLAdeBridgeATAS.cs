@@ -3,10 +3,20 @@
 //  Copyright (c) 2026 Mihai Ostafe — TLADe ATAS Bridge contribution
 //  Copyright (c) 2026 TLADe — Trade Like a Dealer (https://tradelikeadealer.com)
 //
-//  TLADe Bridge — ATAS Edition  v2.4.3
+//  TLADe Bridge — ATAS Edition  v2.4.4
 //  C# indicator for ATAS (Advanced Time & Sales)
 //
 //  Forked from Mihai Ostafe's v2.4.0. Changes since fork:
+//    - v2.4.4: timezone-robust bar timestamps. The previous PostBar relied
+//              on `((DateTimeOffset)cd.Time)` which silently assumes Local
+//              when Kind=Unspecified — fine in the Roma local timezone of
+//              the developer's machine but wrong elsewhere (Mihai's setup
+//              showed a 4h30m shift). v2.4.4 probes the live bar against
+//              DateTime.UtcNow at INIT, picks whichever interpretation —
+//              AsLocal / AsUtc / AsExchange(CT) — lands within ±10 min of
+//              now, and reuses that strategy for the backfill and every
+//              subsequent PostBar. No user setting required.
+//
 //    - v2.4.3: auto re-backfill when the Python bridge has been restarted while
 //              the chart instance is still alive. Every 30s we poll /health,
 //              parse the per-ticker `bars_count`, and if the bridge is below
@@ -105,6 +115,19 @@ namespace ATAS.Indicators.Technical
         private int      _lastPostedDailyBar = -1;
         private DateTime _lastBarDate        = DateTime.MinValue.Date;
         private bool     _liveMode           = false;
+        // Time-resolution strategy auto-detected at INIT against the system
+        // clock. ATAS does NOT document `Candle.Time.Kind`, and the value it
+        // exposes depends on the platform's timezone settings: Local OS,
+        // UTC, or the instrument's exchange timezone (e.g. CME = America/
+        // Chicago). The cast `((DateTimeOffset)cd.Time)` silently assumes
+        // Local for Kind=Unspecified, which produced multi-hour shifts on
+        // setups outside the developer's locale. We probe the live bar
+        // against DateTime.UtcNow once at INIT, pick the interpretation
+        // that lands within 5 minutes of "now", and reuse it for the
+        // backfill and every subsequent PostBar. No user setting needed.
+        private enum TimeStrategy { Unknown, AsLocal, AsUtc, AsExchange }
+        private TimeStrategy _timeStrategy   = TimeStrategy.Unknown;
+        private TimeSpan     _exchangeOffset = TimeSpan.Zero;
         // Auto-rebackfill: if the Python bridge has been restarted (or is empty
         // for any reason) while this chart instance is still alive, the dedup
         // dictionary would block any re-push. We poll /health every 30s; if the
@@ -148,6 +171,7 @@ namespace ATAS.Indicators.Technical
                 var candle0 = GetCandle(bar);
                 _liveMode   = true;
                 Log($"INIT v2.6.0 bar={bar} CurrentBar={CurrentBar} price={candle0?.Close} instrument={DataProvider.InstrumentInfo.Instrument} port={Port}");
+                if (candle0 != null) DetectTimeStrategy(candle0.Time);
                 DoBackfill(bar, "INIT");
             }
 
@@ -314,6 +338,61 @@ namespace ATAS.Indicators.Technical
             base.Dispose();
         }
 
+        // Probe the live bar's reported time against UTC now to figure out how
+        // ATAS is interpreting Candle.Time on this machine. A 5m bar's open
+        // time should be within the [now-5min, now+5min] window. Whichever
+        // interpretation lands there is the right one for this session.
+        private void DetectTimeStrategy(DateTime liveBarTime)
+        {
+            long nowU    = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            long asLocal = ((DateTimeOffset)liveBarTime).ToUnixTimeSeconds();
+            long asUtc   = ((DateTimeOffset)DateTime.SpecifyKind(liveBarTime, DateTimeKind.Utc)).ToUnixTimeSeconds();
+
+            // Exchange candidate: assume CME / America/Chicago for ES/NQ futures.
+            // (SPX/NDX indices follow ET but the ATAS Bridge ships ES/NQ only.)
+            TimeSpan ctOffset;
+            long asExchange;
+            try
+            {
+                var ctTz = TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time");
+                ctOffset = ctTz.GetUtcOffset(liveBarTime);
+                asExchange = new DateTimeOffset(DateTime.SpecifyKind(liveBarTime, DateTimeKind.Unspecified), ctOffset).ToUnixTimeSeconds();
+            }
+            catch
+            {
+                ctOffset = TimeSpan.FromHours(-5);
+                asExchange = asLocal - (long)TimeSpan.FromHours(-5).Negate().TotalSeconds; // never used if catch fires
+            }
+
+            const long TOLERANCE_SEC = 600; // ±10 min — slack for partial closed bars
+            string pick;
+            if (Math.Abs(nowU - asLocal) <= TOLERANCE_SEC) { _timeStrategy = TimeStrategy.AsLocal; pick = "Local"; }
+            else if (Math.Abs(nowU - asUtc) <= TOLERANCE_SEC) { _timeStrategy = TimeStrategy.AsUtc; pick = "Utc"; }
+            else if (Math.Abs(nowU - asExchange) <= TOLERANCE_SEC) { _timeStrategy = TimeStrategy.AsExchange; _exchangeOffset = ctOffset; pick = "Exchange(CT)"; }
+            else { _timeStrategy = TimeStrategy.AsLocal; pick = "Local(fallback,nomatch)"; }
+
+            Log($"TIME_STRATEGY={pick} liveTime={liveBarTime:O} Kind={liveBarTime.Kind} nowU={nowU} asLocal={asLocal}(Δ{nowU-asLocal}s) asUtc={asUtc}(Δ{nowU-asUtc}s) asExchange={asExchange}(Δ{nowU-asExchange}s)");
+        }
+
+        // Apply the auto-detected strategy to convert a bar timestamp into
+        // Unix seconds. Always returns a value; defaults to AsLocal if
+        // strategy was never set (= shouldn't happen because INIT calls
+        // DetectTimeStrategy before any PostBar).
+        private long ResolveUnixSec(DateTime t)
+        {
+            switch (_timeStrategy)
+            {
+                case TimeStrategy.AsUtc:
+                    return ((DateTimeOffset)DateTime.SpecifyKind(t, DateTimeKind.Utc)).ToUnixTimeSeconds();
+                case TimeStrategy.AsExchange:
+                    return new DateTimeOffset(DateTime.SpecifyKind(t, DateTimeKind.Unspecified), _exchangeOffset).ToUnixTimeSeconds();
+                case TimeStrategy.AsLocal:
+                case TimeStrategy.Unknown:
+                default:
+                    return ((DateTimeOffset)t).ToUnixTimeSeconds();
+            }
+        }
+
         private static string NormalizeTicker(string symbol)
         {
             var s = (symbol ?? "").ToUpperInvariant();
@@ -356,11 +435,11 @@ namespace ATAS.Indicators.Technical
         private async Task PostBar(string ticker, int bar, CandleData cd)
         {
             var ci = System.Globalization.CultureInfo.InvariantCulture;
-            // Bridge Protocol §chart_data: `time` must be Unix seconds (integer).
-            // The terminal-side fetcher multiplies by 1000 (sec → ms); an ISO
-            // string would land as NaN and collapse every bar to OHLC=NaN.
-            // DateTimeOffset cast honors cd.Time.Kind (Local/Utc/Unspecified).
-            long unixSec = ((DateTimeOffset)cd.Time).ToUnixTimeSeconds();
+            // Use the auto-detected time strategy (see DetectTimeStrategy +
+            // ResolveUnixSec). This handles Kind=Local / Utc / Unspecified
+            // correctly across platforms regardless of how ATAS exposes the
+            // candle timestamp on a given machine.
+            long unixSec = ResolveUnixSec(cd.Time);
             var payload = "{" +
                 $"\"ticker\":\"{ticker}\"," +
                 $"\"bar_index\":{bar}," +
