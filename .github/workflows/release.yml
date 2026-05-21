@@ -25,10 +25,12 @@ jobs:
           cp -r bridges/ib            pkg/TLADe-IB-Bridge
           cp -r bridges/rithmic       pkg/TLADe-Rithmic-Bridge
           cp -r bridges/ninjatrader   pkg/TLADe-NT8-Bridge
+          cp -r bridges/atas          pkg/TLADe-ATAS-Bundle
           cd pkg
           zip -r ../TLADe-IB-Bridge.zip      TLADe-IB-Bridge
           zip -r ../TLADe-Rithmic-Bridge.zip TLADe-Rithmic-Bridge
           zip -r ../TLADe-NT8-Bridge.zip     TLADe-NT8-Bridge
+          zip -r ../TLADe-ATAS-Bundle.zip    TLADe-ATAS-Bundle
           cd ..
           # All-in-one bundle (for legacy bookmarks pointing to the previous
           # main.zip pattern, and for users who want every bridge at once).
@@ -60,6 +62,7 @@ jobs:
             | Interactive Brokers | `TLADe-IB-Bridge.zip` |
             | Rithmic (Apex / TopstepTrader / Bulenox / 12+ prop firms) | `TLADe-Rithmic-Bridge.zip` |
             | NinjaTrader 8 | `TLADe-NT8-Bridge.zip` |
+            | ATAS Platform (full bundle: bridge + GEX Dashboard + Quantum Field Ladder) | `TLADe-ATAS-Bundle.zip` |
             | All bridges (full bundle, fallback) | `TLADe-AllBridges.zip` |
 
             Source: `bridges/<feed>/` in the repo. Pick the feed you use,
@@ -68,6 +71,7 @@ jobs:
             TLADe-IB-Bridge.zip
             TLADe-Rithmic-Bridge.zip
             TLADe-NT8-Bridge.zip
+            TLADe-ATAS-Bundle.zip
             TLADe-AllBridges.zip
           make_latest: true
           fail_on_unmatched_files: true
