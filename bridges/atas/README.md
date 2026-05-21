@@ -12,8 +12,12 @@ One DLL (`TLAdeBridgeATAS.dll`) ships three indicators:
 
 All three live in the single all-in-one `TLAdeBridgeATAS.dll`, built from the `TLAdeBridgeATAS.csproj` in this directory.
 
-## v3.0.1 — Strike normalization fix
+## Patch notes
 
+### Bridge v2.4.1 — Closed-bar timestamp fix
+The Bridge Protocol §chart_data expects `time` as Unix seconds (integer); the previous version was sending ISO strings, which the terminal parsed as NaN and collapsed every closed 5m bar to a degenerate O=H=L=C tick on the chart. `PostBar()` now emits `time` as `((DateTimeOffset)cd.Time).ToUnixTimeSeconds()`.
+
+### Dashboard / Quantum v3.0.1 — Strike normalization fix
 The cloud `indicatorData` endpoint already returns strikes in the futures price space (ES for the SPX family, NQ for the NDX family). v3.0.0 was double-applying the spread (`rawStrike - EffectiveEsSpread`), causing levels to appear ~19 points below the TLADe Terminal on ES. v3.0.1 uses the strikes as-is. If you ever see a constant offset between ATAS and the terminal on a future Mother-side change, the indicator still exposes the `Manual spread override` setting (use a tiny positive value like `0.001` to bypass conversion entirely).
 
 ---

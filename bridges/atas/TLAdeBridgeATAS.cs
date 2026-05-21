@@ -3,8 +3,14 @@
 //  Copyright (c) 2026 Mihai Ostafe — TLADe ATAS Bridge contribution
 //  Copyright (c) 2026 TLADe — Trade Like a Dealer (https://tradelikeadealer.com)
 //
-//  TLADe Bridge — ATAS Edition  v2.4.0
+//  TLADe Bridge — ATAS Edition  v2.4.1
 //  C# indicator for ATAS (Advanced Time & Sales)
+//
+//  v2.4.1: bugfix — PostBar emits `time` as Unix seconds (integer), matching
+//          the Bridge Protocol §chart_data convention used by gex_data_server3.py
+//          and the other bridges. The previous ISO-string format caused the
+//          terminal to parse NaN timestamps for closed 5m bars, collapsing
+//          every bar to a degenerate O=H=L=C tick when chart_data was consumed.
 //
 //  Architecture:
 //    Rithmic / CQG feed
@@ -226,10 +232,18 @@ namespace ATAS.Indicators.Technical
         private async Task PostBar(string ticker, int bar, CandleData cd)
         {
             var ci = System.Globalization.CultureInfo.InvariantCulture;
+            // The Bridge Protocol §chart_data expects `time` as Unix seconds (integer)
+            // — same convention used by gex_data_server3.py and the other bridges.
+            // The terminal-side fetcher multiplies by 1000 (sec → ms).
+            // Sending an ISO string here would land as a NaN timestamp on the chart,
+            // collapsing every bar to a degenerate O=H=L=C tick.
+            // Cast through DateTimeOffset so the DateTime.Kind (Local/Utc/Unspecified)
+            // is honored and the resulting Unix seconds are correct in UTC.
+            long unixSec = ((DateTimeOffset)cd.Time).ToUnixTimeSeconds();
             var payload = "{" +
                 $"\"ticker\":\"{ticker}\"," +
                 $"\"bar_index\":{bar}," +
-                $"\"time\":\"{cd.Time:O}\"," +
+                $"\"time\":{unixSec}," +
                 $"\"open\":{cd.Open.ToString(ci)}," +
                 $"\"high\":{cd.High.ToString(ci)}," +
                 $"\"low\":{cd.Low.ToString(ci)}," +
