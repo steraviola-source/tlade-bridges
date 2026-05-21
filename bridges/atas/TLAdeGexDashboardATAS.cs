@@ -1,28 +1,33 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SPDX-License-Identifier: MIT
-//  Copyright (c) 2026 Mihai Ostafe — TLADe ATAS Bridge contribution
+//  Copyright (c) 2026 Mihai Ostafe — TLADe ATAS Dashboard contribution
 //  Copyright (c) 2026 TLADe — Trade Like a Dealer (https://tradelikeadealer.com)
 //
-//  TLADe GEX Dashboard — ATAS Edition  v3.0.1
+//  TLADe GEX Dashboard — ATAS Edition  v3.1.0
 //  ─────────────────────────────────────────────────────────────────────────────
-//  v3.0.1: bugfix — ES/NQ strike normalization. The cloud `indicatorData`
-//          endpoint already returns strikes in ES/NQ futures space (post-spread),
-//          so the previous SPX→ES subtraction was double-applying the spread.
-//          Levels are now used as-is from the cloud.
-//  v3.0.0: real OnRender pipeline (the v2.0 dynamic LineSeries approach does not
-//          render correctly inside ATAS). Pattern: EnableCustomDrawing +
-//          SubscribeToDrawingEvents in the constructor, then
-//          OnRender(RenderContext, DrawingLayouts).
+//  Mihai's v3.0.0 with two new features (n8n webhook POSTs on every update,
+//  GEX direction marker showing positive/negative gamma per wall), with a
+//  TLADe-side fix on top: strikes for ES/NQ are passed through raw because
+//  the cloud already publishes them in futures space — subtracting the
+//  ES↔SPX spread again left the levels ~19 points off vs the TLADe terminal.
+//  SPX/NDX/SPY/QQQ paths unchanged.
+//
+//  v3.0.0 (Mihai): REAL OnRender — v2.0 dynamic LineSeries didn't render in
+//          ATAS. Pattern: EnableCustomDrawing + SubscribeToDrawingEvents in
+//          CTOR, then OnRender(RenderContext, DrawingLayouts).
 //
 //  ARCHITECTURE:
-//    1. Auto-fetch from TLADe Cloud Functions (X-API-Key header, mode=free fallback).
-//    2. 6 fetch windows per ET day.
+//    1. Auto-fetch from TLADe Cloud Functions (X-API-Key, mode=free fallback).
+//    2. 6 fetch windows ET/day.
 //    3. Manual paste fallback (GexDataInput).
-//    4. Parse "S:|L:|P:" string -> _levels.
+//    4. Parse S:|L:|P: string -> _levels.
 //    5. OnRender draws horizontal lines + labels + axis markers.
+//    6. n8n webhook (optional): POST levels JSON on every data update.
+//    7. GEX direction marker (optional): small line next to each label —
+//       right = positive GEX, left = negative GEX.
 //
-//  TICKER AUTO-DETECT:
-//    If DisplayTicker="ES" but the chart is NQ/MNQ -> automatic NDX fetch.
+//  AUTO-DETECT TICKER:
+//    If DisplayTicker="ES" but the chart is NQ/MNQ → auto-fetch NDX.
 //
 //  LEVEL TYPES:
 //    CW=Call Wall  PW=Put Wall  GL=GEX Level
@@ -51,7 +56,7 @@ using StringAlignment = System.Drawing.StringAlignment;
 namespace ATAS.Indicators.Technical
 {
     [DisplayName("TLADe GEX Dashboard")]
-    [Description("GEX Walls + System Levels (auto-fetched from TLADe Cloud, native OnRender)")]
+    [Description("GEX Walls + System Levels (auto-fetch from TLADe Cloud, native OnRender)")]
     public class TLAdeGexDashboardATAS : Indicator
     {
         // ──────────────────────────────────────────────────────────────────────
@@ -88,7 +93,7 @@ namespace ATAS.Indicators.Technical
         //  PROPERTIES
         // ──────────────────────────────────────────────────────────────────────
 
-        [Display(Name = "API Key (gol = mode FREE)", GroupName = "1. Source", Order = 1)]
+        [Display(Name = "API Key (empty = FREE mode)", GroupName = "1. Source", Order = 1)]
         public string ApiKey { get; set; } = "";
 
         [Display(Name = "Auto-fetch from TLADe Cloud", GroupName = "1. Source", Order = 2)]
@@ -103,7 +108,7 @@ namespace ATAS.Indicators.Technical
         public string DisplayTicker { get; set; } = "auto";
 
         [Display(Name = "ES↔SPX spread (auto from S:)", GroupName = "2. Layout", Order = 2,
-                 Description = "Read automatically from the cloud S: header. Can be overridden via Manual spread.")]
+                 Description = "Read automatically from the cloud S: header. Can be overridden with Manual spread.")]
         [Range(0, 200)]
         public double EsSpxSpread { get; set; } = 24.0;
 
@@ -112,12 +117,12 @@ namespace ATAS.Indicators.Technical
         public double NqNdxSpread { get; set; } = 40.0;
 
         [Display(Name = "Manual spread override (0 = auto)", GroupName = "2. Layout", Order = 4,
-                 Description = "If > 0, forces the ES↔SPX spread to this value instead of the cloud S: header. Use a tiny positive value (e.g. 0.001) to bypass spread conversion entirely if you see a constant offset vs the TLADe Terminal.")]
+                 Description = "If > 0, forces the ES↔SPX spread to this value instead of S: from cloud. Useful to match TLADe Terminal.")]
         [Range(0, 200)]
         public double ManualSpreadOverride { get; set; } = 0.0;
 
         [Display(Name = "Snap to instrument tick", GroupName = "2. Layout", Order = 5,
-                 Description = "Round prices to the nearest tick (0.25 on ES). Line + label snap exactly to the ATAS grid.")]
+                 Description = "Rounds prices to the nearest tick (0.25 on ES). Line + label land exactly on the ATAS grid.")]
         public bool SnapToTick { get; set; } = true;
 
         [Display(Name = "Show GEX walls (CW/PW)", GroupName = "3. Visibility", Order = 1)]
@@ -161,7 +166,7 @@ namespace ATAS.Indicators.Technical
         public int LabelFontSize { get; set; } = 9;
 
         [Display(Name = "Label text inherits line color", GroupName = "5. Style", Order = 7,
-                 Description = "Default ON. Uncheck to force a custom text color (useful when red/green don't read well on your background).")]
+                 Description = "Default ON. Uncheck to force a custom text color (useful if red/green is not visible on your background).")]
         public bool LabelInheritLineColor { get; set; } = true;
 
         [Display(Name = "Label text color (when not inheriting)", GroupName = "5. Style", Order = 8)]
@@ -171,14 +176,14 @@ namespace ATAS.Indicators.Technical
         [Range(0, 255)]
         public int LabelBgAlpha { get; set; } = 140;
 
-        [Display(Name = "Fundal label diferentiat above/below spot", GroupName = "5. Style", Order = 10,
-                 Description = "Default OFF (background derived from line color). When ON, levels above spot use the Above color, those below use Below.")]
+        [Display(Name = "Label background differs above/below spot", GroupName = "5. Style", Order = 10,
+                 Description = "Default OFF (background derived from line color). When ON, levels above spot use the Above color, below spot use Below.")]
         public bool LabelBgPositional { get; set; } = false;
 
-        [Display(Name = "Fundal label - above spot", GroupName = "5. Style", Order = 11)]
+        [Display(Name = "Label background - above spot", GroupName = "5. Style", Order = 11)]
         public Color LabelBgAbove { get; set; } = Color.FromRgb(0xdc, 0x26, 0x26); // brighter red
 
-        [Display(Name = "Fundal label - below spot", GroupName = "5. Style", Order = 12)]
+        [Display(Name = "Label background - below spot", GroupName = "5. Style", Order = 12)]
         public Color LabelBgBelow { get; set; } = Color.FromRgb(0x16, 0xa3, 0x4a); // brighter green
 
         [Display(Name = "Scale wall lines by magnitude", GroupName = "5. Style", Order = 4,
@@ -192,6 +197,34 @@ namespace ATAS.Indicators.Technical
         [Display(Name = "Wall line min width (% chart)", GroupName = "5. Style", Order = 6)]
         [Range(1, 50)]
         public int WallMinPct { get; set; } = 5;
+
+        [Display(Name = "Send to n8n", GroupName = "6. n8n Webhook", Order = 1,
+                 Description = "Check to POST the levels to the n8n webhook on every data update.")]
+        public bool N8nEnabled { get; set; } = false;
+
+        [Display(Name = "n8n Webhook URL", GroupName = "6. n8n Webhook", Order = 2,
+                 Description = "Paste the n8n webhook URL (e.g. https://host/webhook/atas-gex). Data is sent as JSON in the body.")]
+        public string N8nWebhookUrl { get; set; } = "";
+
+        [Display(Name = "Show GEX direction (left/right)", GroupName = "7. GEX Direction", Order = 1,
+                 Description = "Draws a small line next to each level's label box: right = positive GEX, left = negative GEX (from the cloud P: section).")]
+        public bool ShowGexDirection { get; set; } = true;
+
+        [Display(Name = "Length proportional to wall strength", GroupName = "7. GEX Direction", Order = 2,
+                 Description = "When ON, line length is proportional to wall magnitude (strong gamma = long, weak = short). When OFF, all use the maximum length.")]
+        public bool GexScaleByStrength { get; set; } = true;
+
+        [Display(Name = "GEX line min length (px)", GroupName = "7. GEX Direction", Order = 3)]
+        [Range(1, 200)]
+        public int GexTickLengthMin { get; set; } = 4;
+
+        [Display(Name = "GEX line max length (px)", GroupName = "7. GEX Direction", Order = 4)]
+        [Range(2, 400)]
+        public int GexTickLength { get; set; } = 40;
+
+        [Display(Name = "GEX line thickness", GroupName = "7. GEX Direction", Order = 5)]
+        [Range(1, 20)]
+        public int GexTickWidth { get; set; } = 3;
 
         // ──────────────────────────────────────────────────────────────────────
         //  CONSTRUCTOR
@@ -251,6 +284,7 @@ namespace ATAS.Indicators.Technical
                         _rawData = GexDataInput;
                         ParseData(_rawData);
                         RedrawChart();
+                        Task.Run(() => PushToN8n());
                     }
                     return;
                 }
@@ -342,11 +376,97 @@ namespace ATAS.Indicators.Technical
                 _rawData       = body;
                 ParseData(body);
                 RedrawChart();
+                await PushToN8n().ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 Log($"FetchOnce ERR: {ex.Message}");
             }
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        //  N8N WEBHOOK PUSH
+        // ──────────────────────────────────────────────────────────────────────
+
+        private async Task PushToN8n()
+        {
+            try
+            {
+                if (!N8nEnabled) return;
+                var url = (N8nWebhookUrl ?? "").Trim();
+                if (string.IsNullOrEmpty(url)) return;
+                if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log($"N8N skip: URL invalid '{url}'");
+                    return;
+                }
+
+                List<LevelEntry> snap;
+                lock (_lvlLock) snap = new List<LevelEntry>(_levels);
+                if (snap.Count == 0) return;
+
+                string ticker = ResolveTicker();
+                string mode   = _isDelayedMode ? "FREE" : "LIVE";
+                double spot   = GetLiveSpot();
+
+                var sb = new System.Text.StringBuilder(2048);
+                sb.Append('{');
+                sb.Append("\"source\":\"TLADe GEX Dashboard\",");
+                sb.Append("\"ticker\":\"").Append(JsonEsc(ticker)).Append("\",");
+                sb.Append("\"mode\":\"").Append(mode).Append("\",");
+                sb.Append("\"spot\":").Append(spot.ToString("0.####", _inv)).Append(',');
+                sb.Append("\"esSpxSpread\":").Append(EffectiveEsSpread.ToString("0.####", _inv)).Append(',');
+                sb.Append("\"timestampUtc\":\"").Append(DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", _inv)).Append("\",");
+                sb.Append("\"count\":").Append(snap.Count).Append(',');
+                sb.Append("\"raw\":\"").Append(JsonEsc(_rawData)).Append("\",");
+                sb.Append("\"levels\":[");
+                for (int i = 0; i < snap.Count; i++)
+                {
+                    var lvl = snap[i];
+                    if (i > 0) sb.Append(',');
+                    sb.Append('{');
+                    sb.Append("\"strike\":").Append(lvl.RawStrike.ToString("0.####", _inv)).Append(',');
+                    sb.Append("\"price\":").Append(ConvertPrice(lvl.RawStrike).ToString("0.####", _inv)).Append(',');
+                    sb.Append("\"type\":\"").Append(JsonEsc(lvl.Type)).Append("\",");
+                    sb.Append("\"label\":\"").Append(JsonEsc(lvl.Label)).Append("\",");
+                    sb.Append("\"magnitude\":").Append(lvl.Magnitude.ToString("0.####", _inv));
+                    sb.Append('}');
+                }
+                sb.Append("]}");
+
+                using var content = new StringContent(sb.ToString(),
+                    System.Text.Encoding.UTF8, "application/json");
+                using var resp = await _http.PostAsync(url, content).ConfigureAwait(false);
+                Log($"N8N POST {ticker} levels={snap.Count}: HTTP {(int)resp.StatusCode}");
+            }
+            catch (Exception ex)
+            {
+                Log($"N8N PushToN8n ERR: {ex.Message}");
+            }
+        }
+
+        private static string JsonEsc(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var sb = new System.Text.StringBuilder(s.Length + 8);
+            foreach (var c in s)
+            {
+                switch (c)
+                {
+                    case '"':  sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\b': sb.Append("\\b");  break;
+                    case '\f': sb.Append("\\f");  break;
+                    case '\n': sb.Append("\\n");  break;
+                    case '\r': sb.Append("\\r");  break;
+                    case '\t': sb.Append("\\t");  break;
+                    default:
+                        if (c < ' ') sb.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                        else sb.Append(c);
+                        break;
+                }
+            }
+            return sb.ToString();
         }
 
         // ──────────────────────────────────────────────────────────────────────
@@ -378,16 +498,36 @@ namespace ATAS.Indicators.Technical
             }
 
             string levelsData = "";
+            string profileData = "";
             int pPos = raw.IndexOf("|P:", StringComparison.Ordinal);
             if (pPos >= 0)
             {
                 var before = raw.Substring(0, pPos);
                 if (before.StartsWith("L:", StringComparison.Ordinal))
                     levelsData = before.Substring(2);
+                profileData = raw.Substring(pPos + 3);   // dupa "|P:"
             }
             else if (raw.StartsWith("L:", StringComparison.Ordinal))
             {
                 levelsData = raw.Substring(2);
+            }
+
+            // P: = profil GEX per strike -> map strike(rotunjit) -> semn (+1/-1)
+            var signMap = new Dictionary<long, int>();
+            if (!string.IsNullOrEmpty(profileData))
+            {
+                foreach (var pair in profileData.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var p = pair.Split(',');
+                    if (p.Length < 2) continue;
+                    if (!double.TryParse(p[0], NumberStyles.Any, _inv, out var pstrike)) continue;
+                    int sign = 0;
+                    if (p.Length >= 3 && int.TryParse(p[2], NumberStyles.Any, _inv, out var s))
+                        sign = Math.Sign(s);
+                    else if (double.TryParse(p[1], NumberStyles.Any, _inv, out var v))
+                        sign = v >= 0 ? 1 : -1;
+                    signMap[(long)Math.Round(pstrike)] = sign;
+                }
             }
 
             if (!string.IsNullOrEmpty(levelsData))
@@ -401,12 +541,14 @@ namespace ATAS.Indicators.Technical
                     var label = (parts[2] ?? "").Trim();
                     double mag = 0;
                     if (parts.Length >= 5) double.TryParse(parts[4], NumberStyles.Any, _inv, out mag);
+                    int gsign = signMap.TryGetValue((long)Math.Round(strike), out var sv) ? sv : 0;
                     fresh.Add(new LevelEntry
                     {
                         RawStrike = strike,
                         Type      = type,
                         Label     = label,
                         Magnitude = Math.Abs(mag),
+                        GexSign   = gsign,
                     });
                 }
             }
@@ -470,6 +612,13 @@ namespace ATAS.Indicators.Technical
                         maxWallMag = lvl.Magnitude;
                 if (maxWallMag <= 0) maxWallMag = 1;
 
+                // Max magnitude printre nivelele cu directie GEX, pt scalarea lungimii liniutei
+                double maxTickMag = 0;
+                foreach (var lvl in snap)
+                    if (lvl.GexSign != 0 && lvl.Magnitude > maxTickMag)
+                        maxTickMag = lvl.Magnitude;
+                if (maxTickMag <= 0) maxTickMag = 1;
+
                 double maxWallPx = regionW * (WallMaxPct / 100.0);
                 double minWallPx = regionW * (WallMinPct / 100.0);
 
@@ -532,7 +681,15 @@ namespace ATAS.Indicators.Technical
                         if (lineX1 < 0) lineX1 = 0;
                     }
 
-                    HL(ctx, (decimal)y, $"{FormatPrice(lvl.RawStrike)} {lvl.Label}", color, width, lineX1, x2, isAbove);
+                    int tickLen = GexTickLength;
+                    if (GexScaleByStrength)
+                    {
+                        double frac = lvl.Magnitude > 0 ? Math.Min(1.0, lvl.Magnitude / maxTickMag) : 0;
+                        tickLen = (int)Math.Round(GexTickLengthMin + frac * (GexTickLength - GexTickLengthMin));
+                        if (tickLen < 1) tickLen = 1;
+                    }
+
+                    HL(ctx, (decimal)y, $"{FormatPrice(lvl.RawStrike)} {lvl.Label}", color, width, lineX1, x2, isAbove, lvl.GexSign, tickLen);
                     drawn++;
                 }
 
@@ -545,7 +702,7 @@ namespace ATAS.Indicators.Technical
             }
         }
 
-        private void HL(RenderContext ctx, decimal price, string label, DColor color, int width, int x1, int x2, bool isAbove)
+        private void HL(RenderContext ctx, decimal price, string label, DColor color, int width, int x1, int x2, bool isAbove, int gexSign, int tickLen)
         {
             if (price <= 0m) return;
             int y = ChartInfo.GetYByPrice(price, false);
@@ -576,9 +733,22 @@ namespace ATAS.Indicators.Technical
                 var textCol = LabelInheritLineColor
                     ? color
                     : DColor.FromArgb(LabelTextColor.A, LabelTextColor.R, LabelTextColor.G, LabelTextColor.B);
-                ctx.FillRectangle(bg, new DRect(lx - 2, ly - 1, labW + 6, labH + 2));
+                int boxX = lx - 2, boxY = ly - 1, boxW = labW + 6, boxH = labH + 2;
+                ctx.FillRectangle(bg, new DRect(boxX, boxY, boxW, boxH));
                 ctx.DrawString(label, _fn, textCol,
                     new DRect(lx, ly, labW + 4, labH), _sfL);
+
+                // Liniuta directie GEX: dreapta = pozitiv, stanga = negativ. Culoarea liniei nivelului.
+                if (ShowGexDirection && gexSign != 0)
+                {
+                    int midY = boxY + boxH / 2;
+                    const int gap = 3;
+                    int tx1, tx2;
+                    if (gexSign > 0) { tx1 = boxX + boxW + gap; tx2 = tx1 + tickLen; }
+                    else             { tx2 = boxX - gap;        tx1 = tx2 - tickLen; }
+                    var tickPen = new RenderPen(color, GexTickWidth);
+                    ctx.DrawLine(tickPen, tx1, midY, tx2, midY);
+                }
             }
 
             if (ShowAxisMarkers)
@@ -662,20 +832,20 @@ namespace ATAS.Indicators.Technical
 
         private double ConvertPrice(double rawStrike)
         {
-            // TLADe cloud `indicatorData` returns strikes already in the futures
-            // price space (ES for the SPX family, NQ for the NDX family) — the
-            // spread is applied upstream when the snapshot is built. For ETF
-            // proxies (SPY/QQQ) we still divide by the conventional multipliers.
-            // Snap to the chart's tick grid at the end so labels align cleanly.
+            // The TLADe cloud publishes ES/NQ strikes ALREADY in futures space
+            // (the ES↔SPX spread is applied server-side before the snapshot is
+            // written). So for the futures tickers we just pass the raw strike
+            // through. SPX / NDX stay raw; SPY = SPX / 10; QQQ = NDX / 40.
+            // SnapToTick rounds to the instrument's tick grid afterwards.
             double cv;
             switch (ResolveTicker())
             {
                 case "SPX": cv = rawStrike; break;
                 case "SPY": cv = rawStrike / 10.0; break;
-                case "ES":  cv = rawStrike; break;        // already ES futures space
+                case "ES":  cv = rawStrike; break;                          // already in ES futures space
                 case "NDX": cv = rawStrike; break;
                 case "QQQ": cv = rawStrike / 40.0; break;
-                case "NQ":  cv = rawStrike; break;        // already NQ futures space
+                case "NQ":  cv = rawStrike; break;                          // already in NQ futures space
                 default:    cv = rawStrike; break;
             }
             return SnapPrice(cv);
@@ -718,6 +888,7 @@ namespace ATAS.Indicators.Technical
             public string Type;
             public string Label;
             public double Magnitude;
+            public int    GexSign;     // +1 = GEX pozitiv (dreapta), -1 = negativ (stanga), 0 = necunoscut
         }
     }
 }

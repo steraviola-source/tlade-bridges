@@ -1,23 +1,24 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SPDX-License-Identifier: MIT
-//  Copyright (c) 2026 Mihai Ostafe — TLADe ATAS Bridge contribution
+//  Copyright (c) 2026 Mihai Ostafe — TLADe ATAS Quantum Field Ladder contribution
 //  Copyright (c) 2026 TLADe — Trade Like a Dealer (https://tradelikeadealer.com)
 //
 //  TLADe Quantum Field Ladder — ATAS Edition  v3.0.1
 //  ─────────────────────────────────────────────────────────────────────────────
-//  v3.0.1: bugfix — strike normalization aligned with the GEX Dashboard. The
-//          cloud `indicatorData` endpoint returns strikes already in ES/NQ
-//          futures space, so no spread subtraction is needed.
-//  v3.0.0: real OnRender pipeline (the v2.0 stacked LineSeries approach does
-//          not render correctly in ATAS). Uses FillRectangle (gradient bands)
-//          + DrawLine (centre line).
+//  Mihai's v3.0.0 with a TLADe-side fix on top: strikes for ES/NQ are passed
+//  through raw because the cloud already publishes them in futures space —
+//  subtracting the ES↔SPX spread again left levels ~19 points off vs the
+//  TLADe terminal. SPX/NDX/SPY/QQQ paths unchanged.
 //
-//  MAPPING (data from TLADe Cloud; only ZG / CW / PW are surfaced here):
+//  v3.0.0 (Mihai): REAL OnRender — v2.0 stacked LineSeries didn't render in
+//          ATAS. Uses FillRectangle (gradient bands) + DrawLine (center).
+//
+//  MAPPING (data from TLADe Cloud, only ZG/CW/PW returned):
 //    ZG (Zero Gamma) → MAGNET (cyan band)
 //    CW (Call Wall)  → WALL   (magenta band)
 //    PW (Put Wall)   → WALL   (magenta band)
 //
-//  Intensity is proportional to GEX magnitude (column 5 of L:).
+//  Intensity proportional to GEX magnitude (col. 5 from L:).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 using System;
@@ -77,10 +78,10 @@ namespace ATAS.Indicators.Technical
         //  PROPERTIES
         // ──────────────────────────────────────────────────────────────────────
 
-        [Display(Name = "API Key (gol = mode FREE)", GroupName = "1. Source", Order = 1)]
+        [Display(Name = "API Key (empty = FREE mode)", GroupName = "1. Source", Order = 1)]
         public string ApiKey { get; set; } = "";
 
-        [Display(Name = "Auto-fetch din TLADe Cloud", GroupName = "1. Source", Order = 2)]
+        [Display(Name = "Auto-fetch from TLADe Cloud", GroupName = "1. Source", Order = 2)]
         public bool AutoFetch { get; set; } = true;
 
         [Display(Name = "Manual data string (override)", GroupName = "1. Source", Order = 3)]
@@ -98,11 +99,11 @@ namespace ATAS.Indicators.Technical
         public double NqNdxSpread { get; set; } = 40.0;
 
         [Display(Name = "Manual spread override (0 = auto)", GroupName = "2. Layout", Order = 4,
-                 Description = "If > 0, forces the ES↔SPX spread to this value instead of the cloud S: header. Use a tiny positive value (e.g. 0.001) to bypass spread conversion entirely.")]
+                 Description = "If > 0, forces the ES↔SPX spread to this value instead of S: from cloud.")]
         [Range(0, 200)]
         public double ManualSpreadOverride { get; set; } = 0.0;
 
-        [Display(Name = "Snap la tick-ul instrumentului", GroupName = "2. Layout", Order = 5)]
+        [Display(Name = "Snap to instrument tick", GroupName = "2. Layout", Order = 5)]
         public bool SnapToTick { get; set; } = true;
 
         [Display(Name = "Max levels (5..20)", GroupName = "3. Render", Order = 1)]
@@ -110,7 +111,7 @@ namespace ATAS.Indicators.Technical
         public int MaxLevels { get; set; } = 8;
 
         [Display(Name = "Band width (ticks)", GroupName = "3. Render", Order = 2,
-                 Description = "Latimea totala a benzii in jurul strike-ului")]
+                 Description = "Total band width around the strike")]
         [Range(2, 200)]
         public int BandWidthTicks { get; set; } = 12;
 
@@ -123,8 +124,8 @@ namespace ATAS.Indicators.Technical
         [Range(1, 5)]
         public int CenterLineWidth { get; set; } = 2;
 
-        [Display(Name = "Benzi sub lumanari (chart in prim-plan)", GroupName = "3. Render", Order = 4,
-                 Description = "Default ON: gradient bands render BEHIND candles, so price stays readable. OFF: bands cover candles (Quantum in foreground). Centre line + label always stay on top.")]
+        [Display(Name = "Bands behind candles (chart in foreground)", GroupName = "3. Render", Order = 4,
+                 Description = "Default ON: gradient bands render BEHIND candles, so you see price clearly. OFF: bands cover candles (Quantum in foreground). Center line + label always stay on top.")]
         public bool BandsBehindCandles { get; set; } = true;
 
         [Display(Name = "Show labels", GroupName = "3. Render", Order = 5)]
@@ -154,13 +155,13 @@ namespace ATAS.Indicators.Technical
         [Range(0, 255)]
         public int LabelBgAlpha { get; set; } = 170;
 
-        [Display(Name = "Fundal label diferentiat above/below spot", GroupName = "4. Colors", Order = 6)]
+        [Display(Name = "Label background differs above/below spot", GroupName = "4. Colors", Order = 6)]
         public bool LabelBgPositional { get; set; } = false;
 
-        [Display(Name = "Fundal label - above spot", GroupName = "4. Colors", Order = 7)]
+        [Display(Name = "Label background - above spot", GroupName = "4. Colors", Order = 7)]
         public Color LabelBgAbove { get; set; } = Color.FromRgb(0xdc, 0x26, 0x26);
 
-        [Display(Name = "Fundal label - below spot", GroupName = "4. Colors", Order = 8)]
+        [Display(Name = "Label background - below spot", GroupName = "4. Colors", Order = 8)]
         public Color LabelBgBelow { get; set; } = Color.FromRgb(0x16, 0xa3, 0x4a);
 
         // ──────────────────────────────────────────────────────────────────────
@@ -591,19 +592,19 @@ namespace ATAS.Indicators.Technical
 
         private double ConvertPrice(double rawStrike)
         {
-            // TLADe cloud `indicatorData` returns strikes already in the futures
-            // price space (ES for SPX family, NQ for NDX family) — the spread is
-            // applied upstream when the snapshot is built. ETF proxies (SPY/QQQ)
-            // still need the conventional multiplier divide.
+            // The TLADe cloud publishes ES/NQ strikes ALREADY in futures space
+            // (the ES↔SPX spread is applied server-side before the snapshot is
+            // written). Pass the raw strike through for futures tickers; subtracting
+            // the spread again would offset levels by ~19 points vs the TLADe terminal.
             double cv;
             switch (ResolveTicker())
             {
                 case "SPX": cv = rawStrike; break;
                 case "SPY": cv = rawStrike / 10.0; break;
-                case "ES":  cv = rawStrike; break;        // already ES futures space
+                case "ES":  cv = rawStrike; break;                          // already in ES futures space
                 case "NDX": cv = rawStrike; break;
                 case "QQQ": cv = rawStrike / 40.0; break;
-                case "NQ":  cv = rawStrike; break;        // already NQ futures space
+                case "NQ":  cv = rawStrike; break;                          // already in NQ futures space
                 default:    cv = rawStrike; break;
             }
             return SnapPrice(cv);
