@@ -41,16 +41,21 @@ Accepted level types:
   vol_band_up, vol_band_down
 """
 
+import json
+import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import Lock
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 PORT    = 5000
 HEARTBEAT_WINDOW_S = 15   # a tick is considered "fresh" if seen within the last N seconds
 MAX_BARS           = 500  # how many 5m bars we keep in memory per ticker
+PERSIST_FILE       = Path(__file__).parent / "state_atas.json"
+PERSIST_EVERY_S    = 30   # how often the disk snapshot is rewritten (background thread)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -94,6 +99,62 @@ def _is_fresh(received_at) -> bool:
     if received_at is None:
         return False
     return (datetime.now(timezone.utc) - received_at).total_seconds() < HEARTBEAT_WINDOW_S
+
+
+# ── Persistence: keep bars/daily across bridge restarts ────────────────────
+# Bridge state is purely the cache of what the ATAS indicator has already
+# pushed. After a Python restart the C# indicator does NOT re-push history
+# (its `_postedBarTimes` dictionary persists for the lifetime of the chart
+# instance), so we lose the backfill until the user manually removes and
+# re-adds the indicator. Persisting `bars`/`daily` on disk every PERSIST_EVERY_S
+# seconds lets the bridge come back warm — the same model as the local cache
+# of any of the IB / Rithmic bridges.
+
+def _serializable_state() -> dict:
+    """Strip non-JSON fields (datetime) from _state for disk serialization."""
+    out = {}
+    for tk, st in _state.items():
+        out[tk] = {
+            "bars":  list(st.get("bars", [])),
+            "daily": list(st.get("daily", [])),
+        }
+    return out
+
+
+def _load_persistent_state() -> None:
+    if not PERSIST_FILE.exists():
+        return
+    try:
+        with open(PERSIST_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        with _lock:
+            for tk, st in (data or {}).items():
+                target = _get_state(tk)
+                target["bars"]  = list(st.get("bars",  []))[-MAX_BARS:]
+                target["daily"] = list(st.get("daily", []))
+        total = sum(len(v.get("bars", [])) for v in data.values())
+        print(f"[PERSIST] loaded {total} bars from {PERSIST_FILE.name}")
+    except Exception as e:
+        print(f"[PERSIST] failed to load {PERSIST_FILE.name}: {e}")
+
+
+def _save_persistent_state() -> None:
+    try:
+        with _lock:
+            snapshot = _serializable_state()
+        tmp = PERSIST_FILE.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f)
+        tmp.replace(PERSIST_FILE)
+    except Exception as e:
+        print(f"[PERSIST] save failed: {e}")
+
+
+def _persist_loop() -> None:
+    import time
+    while True:
+        time.sleep(PERSIST_EVERY_S)
+        _save_persistent_state()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -199,6 +260,7 @@ def health():
     """Liveness probe (Bridge Protocol §health)."""
     with _lock:
         live = [k for k, v in _state.items() if v["spot"] and _is_fresh(v["spot"]["received_at"])]
+        bars_count = {tk: len(st.get("bars", [])) for tk, st in _state.items()}
 
     return jsonify({
         "status":       "ok",
@@ -209,6 +271,10 @@ def health():
         "version":      VERSION,
         "live_tickers": live,
         "port":         PORT,
+        # Per-ticker bar count — the C# indicator reads this to decide whether to
+        # re-run the BACKFILL when the bridge has been restarted with an empty
+        # (or near-empty) cache while the chart instance is still alive.
+        "bars_count":   bars_count,
     })
 
 
@@ -233,6 +299,12 @@ def ib_data():
         daily  = list(st["daily"])
         price  = spot["price"]
         ts     = spot["ts"]
+
+    # Safety net: keep bars sorted by `time` ascending before serializing.
+    # The C# indicator pushes in chronological order, but if a future change
+    # ever lets two POSTs race we want LightWeight Charts on the terminal side
+    # to receive a sorted array regardless.
+    bars.sort(key=lambda b: b.get("time") or 0)
 
     # ── Serialize 5m bars into chart_data format ───────────────────────────
     def extract(key, lst):
@@ -381,4 +453,6 @@ if __name__ == "__main__":
     print("  Bridge -> ATAS TLAdeLevels indicator:")
     print(f"    GET  /get_levels?ticker=ES")
     print()
+    _load_persistent_state()
+    threading.Thread(target=_persist_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)

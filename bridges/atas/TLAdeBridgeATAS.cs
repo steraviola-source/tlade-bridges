@@ -3,14 +3,34 @@
 //  Copyright (c) 2026 Mihai Ostafe — TLADe ATAS Bridge contribution
 //  Copyright (c) 2026 TLADe — Trade Like a Dealer (https://tradelikeadealer.com)
 //
-//  TLADe Bridge — ATAS Edition  v2.4.1
+//  TLADe Bridge — ATAS Edition  v2.4.3
 //  C# indicator for ATAS (Advanced Time & Sales)
 //
-//  v2.4.1: bugfix — PostBar emits `time` as Unix seconds (integer), matching
-//          the Bridge Protocol §chart_data convention used by gex_data_server3.py
-//          and the other bridges. The previous ISO-string format caused the
-//          terminal to parse NaN timestamps for closed 5m bars, collapsing
-//          every bar to a degenerate O=H=L=C tick when chart_data was consumed.
+//  Forked from Mihai Ostafe's v2.4.0. Changes since fork:
+//    - v2.4.3: auto re-backfill when the Python bridge has been restarted while
+//              the chart instance is still alive. Every 30s we poll /health,
+//              parse the per-ticker `bars_count`, and if the bridge is below
+//              the threshold (50) we clear the dedup set and re-push the
+//              200-bar history. Throttled to at most once every 5 minutes.
+//              Pairs with the bridge-side state_atas.json persistence so a
+//              normal Python restart usually doesn't need the rebackfill at all.
+//    - v2.4.2: BACKFILL of the last 200 closed bars on INIT (= first time we
+//              reach the live bar). ATAS already holds these in chart memory;
+//              pushing them makes the bridge self-contained — same model as
+//              IB (reqHistoricalData) and Rithmic (get_historical_time_bars).
+//              When the bridge is up the terminal renders ATAS bars end-to-end;
+//              if the bridge drops, the terminal falls back to Yahoo through
+//              the standard candleService path, just like for IB / Rithmic.
+//              Push is sequential (single Task.Run + foreach) so bars land in
+//              chronological order and LightWeight Charts doesn't trip the
+//              "data must be asc ordered by time" assert.
+//    - v2.4.1: PostBar emits `time` as Unix seconds (integer) instead of ISO
+//              string. Matches the Bridge Protocol §chart_data convention used
+//              by gex_data_server3.py and the other bridges. Without this,
+//              `t * 1000` on the terminal side produces NaN and every bar
+//              collapses to a degenerate OHLC=NaN tick.
+//    - All Romanian comments and Display strings translated to English.
+//    - SPDX MIT header + joint copyright (Mihai Ostafe / TLADe).
 //
 //  Architecture:
 //    Rithmic / CQG feed
@@ -85,16 +105,26 @@ namespace ATAS.Indicators.Technical
         private int      _lastPostedDailyBar = -1;
         private DateTime _lastBarDate        = DateTime.MinValue.Date;
         private bool     _liveMode           = false;
+        // Auto-rebackfill: if the Python bridge has been restarted (or is empty
+        // for any reason) while this chart instance is still alive, the dedup
+        // dictionary would block any re-push. We poll /health every 30s; if the
+        // bridge reports bars_count below BACKFILL_THRESHOLD we clear the dedup
+        // set and re-run the backfill on the next OnCalculate. Throttled to at
+        // most once every 5 minutes to avoid loops.
+        private DateTime _lastHealthCheck    = DateTime.MinValue;
+        private DateTime _lastBackfillTime   = DateTime.MinValue;
+        private volatile bool _needsBackfill = false;
+        private const int BACKFILL_THRESHOLD = 50;
 
         [Display(Name = "Port receiver", GroupName = "TLADe", Order = 1)]
         [Range(1024, 65535)]
         public int Port { get; set; } = 5000;
 
-        [Display(Name = "Interval minim intre tickuri (sec)", GroupName = "TLADe", Order = 2)]
+        [Display(Name = "Min interval between ticks (sec)", GroupName = "TLADe", Order = 2)]
         [Range(1, 30)]
         public int SpotThrottleSeconds { get; set; } = 2;
 
-        [Display(Name = "Trimite bare intraday (off = NT8-like, doar SPOT)", GroupName = "TLADe", Order = 3)]
+        [Display(Name = "Send intraday bars (OFF = NT8-like, SPOT only)", GroupName = "TLADe", Order = 3)]
         public bool SendIntraBars { get; set; } = false;
 
         [Display(Name = "Push daily bar at session rollover", GroupName = "TLADe", Order = 4)]
@@ -118,6 +148,27 @@ namespace ATAS.Indicators.Technical
                 var candle0 = GetCandle(bar);
                 _liveMode   = true;
                 Log($"INIT v2.6.0 bar={bar} CurrentBar={CurrentBar} price={candle0?.Close} instrument={DataProvider.InstrumentInfo.Instrument} port={Port}");
+                DoBackfill(bar, "INIT");
+            }
+
+            // Re-backfill when the bridge looks empty (= Python restarted while
+            // this chart instance is still alive). Throttled health-check every 30s.
+            if (_liveMode && isLastBar)
+            {
+                var nowUtc = DateTime.UtcNow;
+                if ((nowUtc - _lastHealthCheck).TotalSeconds >= 30)
+                {
+                    _lastHealthCheck = nowUtc;
+                    var tk = NormalizeTicker(DataProvider.InstrumentInfo.Instrument);
+                    Task.Run(() => CheckBridgeHealthAsync(tk));
+                }
+                if (_needsBackfill && (nowUtc - _lastBackfillTime).TotalMinutes >= 5)
+                {
+                    _needsBackfill = false;
+                    // Clear dedup so the same Ticks can be re-pushed.
+                    _postedBarTimes.Clear();
+                    DoBackfill(bar, "REBACKFILL");
+                }
             }
 
             // 1) SPOT — throttled to SpotThrottleSeconds, sent from the live bar
@@ -177,6 +228,79 @@ namespace ATAS.Indicators.Technical
             }
         }
 
+        // Push the last BACKFILL_BARS closed bars in chronological order.
+        // Reused from the INIT block and from the auto-detect rebackfill branch.
+        private void DoBackfill(int bar, string reason)
+        {
+            const int BACKFILL_BARS = 200;  // ~16h of 5m bars; ATAS usually holds less
+            var ticker = NormalizeTicker(DataProvider.InstrumentInfo.Instrument);
+            int fromBar = Math.Max(0, bar - BACKFILL_BARS);
+            var toSend = new System.Collections.Generic.List<CandleData>();
+            var idxs   = new System.Collections.Generic.List<int>();
+            for (int i = fromBar; i < bar; i++)
+            {
+                var c = GetCandle(i);
+                if (c == null) continue;
+                if (!_postedBarTimes.TryAdd(c.Time.Ticks, 0)) continue;
+                toSend.Add(new CandleData
+                {
+                    Open = (double)c.Open, High = (double)c.High,
+                    Low  = (double)c.Low,  Close = (double)c.Close,
+                    Volume = (double)c.Volume,
+                    AskVolume = (double)c.Ask, BidVolume = (double)c.Bid,
+                    Delta = (double)c.Delta, MaxDelta = (double)c.MaxDelta, MinDelta = (double)c.MinDelta,
+                    Time = c.Time,
+                });
+                idxs.Add(i);
+            }
+            _lastBackfillTime = DateTime.UtcNow;
+            Task.Run(() =>
+            {
+                for (int k = 0; k < toSend.Count; k++)
+                    PostBar(ticker, idxs[k], toSend[k]);
+            });
+            Log($"BACKFILL[{reason}] queued {toSend.Count} historical bars (range {fromBar}..{bar - 1})");
+        }
+
+        // Poll the Python bridge to see whether it has lost its bar cache.
+        // If so, signal OnCalculate to re-run the backfill.
+        private async Task CheckBridgeHealthAsync(string ticker)
+        {
+            try
+            {
+                using var http = new System.Net.Http.HttpClient
+                {
+                    Timeout = TimeSpan.FromSeconds(2)
+                };
+                var resp = await http.GetAsync($"http://localhost:{Port}/health");
+                if (!resp.IsSuccessStatusCode) return;
+                var body = await resp.Content.ReadAsStringAsync();
+                // Naive parsing — avoid pulling System.Text.Json over the wire
+                // just to read one integer. Find "bars_count":{...} and the
+                // ticker's value inside it.
+                var key = $"\"{ticker}\":";
+                int idx = body.IndexOf("\"bars_count\"");
+                if (idx < 0) return;
+                int tickerIdx = body.IndexOf(key, idx);
+                if (tickerIdx < 0) return;
+                int valStart = tickerIdx + key.Length;
+                int valEnd = valStart;
+                while (valEnd < body.Length && (char.IsDigit(body[valEnd]) || body[valEnd] == ' '))
+                    valEnd++;
+                if (!int.TryParse(body.Substring(valStart, valEnd - valStart).Trim(), out int count))
+                    return;
+                if (count < BACKFILL_THRESHOLD)
+                {
+                    Log($"HEALTH bars_count[{ticker}]={count} < {BACKFILL_THRESHOLD} → scheduling rebackfill");
+                    _needsBackfill = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"HEALTH check failed: {ex.Message}");
+            }
+        }
+
         // Single worker that consumes the channel sequentially — no thread-pool explosion
         private async Task BarWorker()
         {
@@ -232,13 +356,10 @@ namespace ATAS.Indicators.Technical
         private async Task PostBar(string ticker, int bar, CandleData cd)
         {
             var ci = System.Globalization.CultureInfo.InvariantCulture;
-            // The Bridge Protocol §chart_data expects `time` as Unix seconds (integer)
-            // — same convention used by gex_data_server3.py and the other bridges.
-            // The terminal-side fetcher multiplies by 1000 (sec → ms).
-            // Sending an ISO string here would land as a NaN timestamp on the chart,
-            // collapsing every bar to a degenerate O=H=L=C tick.
-            // Cast through DateTimeOffset so the DateTime.Kind (Local/Utc/Unspecified)
-            // is honored and the resulting Unix seconds are correct in UTC.
+            // Bridge Protocol §chart_data: `time` must be Unix seconds (integer).
+            // The terminal-side fetcher multiplies by 1000 (sec → ms); an ISO
+            // string would land as NaN and collapse every bar to OHLC=NaN.
+            // DateTimeOffset cast honors cd.Time.Kind (Local/Utc/Unspecified).
             long unixSec = ((DateTimeOffset)cd.Time).ToUnixTimeSeconds();
             var payload = "{" +
                 $"\"ticker\":\"{ticker}\"," +
