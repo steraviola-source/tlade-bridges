@@ -165,13 +165,24 @@ namespace ATAS.Indicators.Technical
             // ATAS v8: bar = bar being processed; CurrentBar = total count; live bar = CurrentBar - 1
             var isLastBar = bar == CurrentBar - 1;
 
-            // INIT: first time we reach the live bar
+            // Detect the bar-time strategy as soon as we have the live bar,
+            // independently of _liveMode. ATAS may reuse the indicator
+            // instance across reloads with _liveMode already true — in that
+            // case the original INIT branch was skipped and the strategy
+            // stayed Unknown, which fell back to AsLocal and produced the
+            // -2h shift Stefano saw on cd.Time exposed in UTC.
+            if (isLastBar && _timeStrategy == TimeStrategy.Unknown)
+            {
+                var liveCandle = GetCandle(bar);
+                if (liveCandle != null) DetectTimeStrategy(liveCandle.Time);
+            }
+
+            // INIT: first time we reach the live bar (this instance lifetime)
             if (!_liveMode && isLastBar)
             {
                 var candle0 = GetCandle(bar);
                 _liveMode   = true;
                 Log($"INIT v2.6.0 bar={bar} CurrentBar={CurrentBar} price={candle0?.Close} instrument={DataProvider.InstrumentInfo.Instrument} port={Port}");
-                if (candle0 != null) DetectTimeStrategy(candle0.Time);
                 DoBackfill(bar, "INIT");
             }
 
