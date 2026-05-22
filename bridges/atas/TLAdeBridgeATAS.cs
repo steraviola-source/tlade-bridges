@@ -375,12 +375,22 @@ namespace ATAS.Indicators.Technical
                 asExchange = asLocal - (long)TimeSpan.FromHours(-5).Negate().TotalSeconds; // never used if catch fires
             }
 
-            const long TOLERANCE_SEC = 600; // ±10 min — slack for partial closed bars
+            // Pick the strategy whose interpretation is CLOSEST to "now". No
+            // hard tolerance — when GetCandle(bar) returns the last closed bar
+            // its open can be 5+ minutes behind now, and we still want to
+            // honour the closest match (which beats any other strategy by
+            // hours). Safety net: if even the closest is > 2h off, fall back
+            // to AsLocal to avoid garbage on a malformed input.
+            long absL = Math.Abs(nowU - asLocal);
+            long absU = Math.Abs(nowU - asUtc);
+            long absE = Math.Abs(nowU - asExchange);
+            long min  = Math.Min(absL, Math.Min(absU, absE));
+            const long SANITY_SEC = 7200; // 2h — refuse detection if the best candidate is still wildly off
             string pick;
-            if (Math.Abs(nowU - asLocal) <= TOLERANCE_SEC) { _timeStrategy = TimeStrategy.AsLocal; pick = "Local"; }
-            else if (Math.Abs(nowU - asUtc) <= TOLERANCE_SEC) { _timeStrategy = TimeStrategy.AsUtc; pick = "Utc"; }
-            else if (Math.Abs(nowU - asExchange) <= TOLERANCE_SEC) { _timeStrategy = TimeStrategy.AsExchange; _exchangeOffset = ctOffset; pick = "Exchange(CT)"; }
-            else { _timeStrategy = TimeStrategy.AsLocal; pick = "Local(fallback,nomatch)"; }
+            if (min > SANITY_SEC) { _timeStrategy = TimeStrategy.AsLocal; pick = "Local(fallback,allfar)"; }
+            else if (min == absU) { _timeStrategy = TimeStrategy.AsUtc;       pick = "Utc"; }
+            else if (min == absE) { _timeStrategy = TimeStrategy.AsExchange;  _exchangeOffset = ctOffset; pick = "Exchange(CT)"; }
+            else                  { _timeStrategy = TimeStrategy.AsLocal;     pick = "Local"; }
 
             Log($"TIME_STRATEGY={pick} liveTime={liveBarTime:O} Kind={liveBarTime.Kind} nowU={nowU} asLocal={asLocal}(Δ{nowU-asLocal}s) asUtc={asUtc}(Δ{nowU-asUtc}s) asExchange={asExchange}(Δ{nowU-asExchange}s)");
         }
