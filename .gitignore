@@ -14,3 +14,9 @@ venv/
 .vscode/
 *.swp
 .DS_Store
+
+# .NET build artifacts — pre-built DLLs are tracked explicitly
+obj/
+*.pdb
+*.deps.json
+bridges/atas/state_atas.json

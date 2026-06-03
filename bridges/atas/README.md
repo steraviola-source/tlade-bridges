@@ -12,6 +12,12 @@ One DLL (`TLAdeBridgeATAS.dll`) ships three indicators:
 
 All three live in the single all-in-one `TLAdeBridgeATAS.dll`, built from the `TLAdeBridgeATAS.csproj` in this directory.
 
+## Platforms
+
+This directory is the **Windows official build** — currently at `TLAdeBridgeATAS.cs` v2.4.4 / `tlade_bridge_atas.py` v1.3.0. It is the stable line published on top of Mihai Ostafe's v2.4.0 baseline, with all his credits preserved. The build is what Windows users have been running in production and is **not modified** when a Mac-specific issue is patched.
+
+> **Mac users:** a separate, community-maintained Mac port lives in [`mac/`](./mac/). It is a derivative work — different `.csproj`, different DLL, with its own patch history (Krzysztof's Mac port + Cornel's defensive OHLC guards). The Windows build above is not affected by what happens in `mac/`.
+
 ## Patch notes
 
 ### Bridge v2.4.1 — Closed-bar timestamp fix
