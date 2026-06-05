@@ -3,10 +3,22 @@
 //  Copyright (c) 2026 Mihai Ostafe — TLADe ATAS Bridge contribution
 //  Copyright (c) 2026 TLADe — Trade Like a Dealer (https://tradelikeadealer.com)
 //
-//  TLADe Bridge — ATAS Edition  v2.7.0
+//  TLADe Bridge — ATAS Edition  v2.7.1 (Mac)
 //  C# indicator for ATAS (Advanced Time & Sales)
 //
 //  Forked from Mihai Ostafe's v2.4.0. Changes since fork:
+//    - v2.7.1: port the closest-candidate time-strategy probe from the
+//              Windows bridge (`3b89143`). The previous Mac port used the
+//              old ±10 min hard tolerance — when GetCandle(bar) returned
+//              the last CLOSED bar (open already several minutes behind
+//              UtcNow) NONE of the three candidates landed inside the
+//              gate, so detection silently fell back to AsLocal. On a
+//              Mac in a non-CT timezone this produced 2-7h shifted bar
+//              timestamps and the terminal rendered every session box
+//              off by that same amount. Closest-wins removes the gate
+//              and resolves the strategy unambiguously (candidates are
+//              always at least 1h apart).
+//
 //    - v2.7.0: defensive guard against partial / malformed bars reaching the
 //              terminal. The lightweight-charts library on the terminal side
 //              throws "Value is null" the moment any OHLC field comes through
@@ -185,7 +197,7 @@ namespace ATAS.Indicators.Technical
             {
                 var candle0 = GetCandle(bar);
                 _liveMode   = true;
-                Log($"INIT v2.7.0 bar={bar} CurrentBar={CurrentBar} price={candle0?.Close} instrument={DataProvider.InstrumentInfo.Instrument} port={Port}");
+                Log($"INIT v2.7.1 bar={bar} CurrentBar={CurrentBar} price={candle0?.Close} instrument={DataProvider.InstrumentInfo.Instrument} port={Port}");
                 if (candle0 != null) DetectTimeStrategy(candle0.Time);
                 DoBackfill(bar, "INIT");
             }
@@ -379,12 +391,22 @@ namespace ATAS.Indicators.Technical
                 asExchange = asLocal - (long)TimeSpan.FromHours(-5).Negate().TotalSeconds; // never used if catch fires
             }
 
-            const long TOLERANCE_SEC = 600; // ±10 min — slack for partial closed bars
+            // Pick the strategy whose interpretation is CLOSEST to "now". No
+            // hard tolerance — when GetCandle(bar) returns the last closed bar
+            // its open can be 5+ minutes behind now, and we still want to
+            // honour the closest match (which beats any other strategy by
+            // hours). Safety net: if even the closest is > 2h off, fall back
+            // to AsLocal to avoid garbage on a malformed input.
+            long absL = Math.Abs(nowU - asLocal);
+            long absU = Math.Abs(nowU - asUtc);
+            long absE = Math.Abs(nowU - asExchange);
+            long min  = Math.Min(absL, Math.Min(absU, absE));
+            const long SANITY_SEC = 7200; // 2h — refuse detection if the best candidate is still wildly off
             string pick;
-            if (Math.Abs(nowU - asLocal) <= TOLERANCE_SEC) { _timeStrategy = TimeStrategy.AsLocal; pick = "Local"; }
-            else if (Math.Abs(nowU - asUtc) <= TOLERANCE_SEC) { _timeStrategy = TimeStrategy.AsUtc; pick = "Utc"; }
-            else if (Math.Abs(nowU - asExchange) <= TOLERANCE_SEC) { _timeStrategy = TimeStrategy.AsExchange; _exchangeOffset = ctOffset; pick = "Exchange(CT)"; }
-            else { _timeStrategy = TimeStrategy.AsLocal; pick = "Local(fallback,nomatch)"; }
+            if (min > SANITY_SEC) { _timeStrategy = TimeStrategy.AsLocal; pick = "Local(fallback,allfar)"; }
+            else if (min == absU) { _timeStrategy = TimeStrategy.AsUtc;       pick = "Utc"; }
+            else if (min == absE) { _timeStrategy = TimeStrategy.AsExchange;  _exchangeOffset = ctOffset; pick = "Exchange(CT)"; }
+            else                  { _timeStrategy = TimeStrategy.AsLocal;     pick = "Local"; }
 
             Log($"TIME_STRATEGY={pick} liveTime={liveBarTime:O} Kind={liveBarTime.Kind} nowU={nowU} asLocal={asLocal}(Δ{nowU-asLocal}s) asUtc={asUtc}(Δ{nowU-asUtc}s) asExchange={asExchange}(Δ{nowU-asExchange}s)");
         }
