@@ -55,7 +55,7 @@ credit; the root-level source is the TLADe-patched build. See
 | Integration | Status | Surface | Contributor |
 |---|---|---|---|
 | [ATAS](bridges/atas/) | **Ready** | ATAS Platform — Bridge + GEX Dashboard + Quantum Field Ladder (Rithmic / CQG via ATAS data) | Mihai (C# + Python) |
-| [MotiveWave](bridges/motivawe/) | **Ready (Java 26+)** | TLADe levels overlay on MotiveWave charts. Universal Java 17 build in progress. | Herat Acharya (Java) |
+| [MotiveWave](bridges/motivawe/) | **Ready (cross-OS, MW Java 25+)** | TLADe levels overlay on MotiveWave charts. Single jar for macOS, Windows and Linux. | Herat Acharya (Java) |
 | [CQG](bridges/cqg/) | Wanted | CQG API direct | — |
 
 ## Build Your Own Bridge

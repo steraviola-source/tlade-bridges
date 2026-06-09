@@ -1,6 +1,6 @@
 # TLADe GEX Dashboard — MotiveWave Indicator
 
-**Status: Java 26+ (compatible build coming for older MotiveWave installs)**
+**Status: cross-OS (macOS + Windows + Linux), MotiveWave Java 25+**
 
 Overlay TLADe GEX levels directly on your MotiveWave chart. Same data
 contract as the TradingView indicator (`S:|L:|P:` string) — same six
@@ -26,28 +26,31 @@ swap-safe and removes a re-entrancy edge in `calculateValues`.
 
 ## Requirements
 
-- MotiveWave with Java **26** runtime (the bundled `mwave_sdk.jar` must
-  match — `class file version 70`)
+- MotiveWave with Java **25 or newer** runtime (covers all current
+  macOS, Windows and Linux installs; the bundled `mwave_sdk.jar` must
+  be class file version 69 or higher)
 - A TLADe subscription with a valid API key for live data; without a
   key the indicator falls back to the free/delayed cloud endpoint
 - ~5 MB free in `MotiveWave Extensions/` for the compiled `.jar`
 
 ⚠️ **Older MotiveWave (Java 17 / 21):** the prebuilt `.jar` here will
-NOT load — its bytecode is Java 26. A backward-compatible build is in
-the works (target Java 17, single universal jar). For now, either:
-
-- update MotiveWave to the latest release (Java 26+), or
-- recompile from source against your local `mwave_sdk.jar` (see below)
+NOT load — its bytecode is Java 25. Either update MotiveWave to the
+latest release, or recompile from source against your local
+`mwave_sdk.jar` (see below).
 
 ## Install (prebuilt jar)
 
-A prebuilt `TLADeGexDashboard.jar` is attached to the latest release on
-GitHub (Java 26 only for now):
+A prebuilt `TLADeGexDashboard.jar` ships in
+[`dist/TLADeGexDashboard.jar`](./dist/TLADeGexDashboard.jar) (and is
+attached to the latest GitHub release). Same file works on macOS,
+Windows and Linux.
 
 1. Close MotiveWave completely.
-2. Download `TLADeGexDashboard.jar` from the release page.
+2. Download `TLADeGexDashboard.jar` from the `dist/` folder or the
+   release page.
 3. Drop it into `~/MotiveWave Extensions/` (macOS) or
-   `%USERPROFILE%\MotiveWave Extensions\` (Windows).
+   `%USERPROFILE%\MotiveWave Extensions\` (Windows). Replace any
+   previous `TLADeGexDashboard.jar` you may have installed.
 4. Reopen MotiveWave → open a chart (ES or NQ futures) →
    **Study → My Studies → "TLADe GEX"**.
 5. Optionally enter your API key under the indicator's **Data → API

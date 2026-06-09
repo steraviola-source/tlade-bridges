@@ -1,5 +1,28 @@
 # CHANGELOG — MotiveWave Indicator
 
+## 2026-06-09 — Cross-OS build (v1.2)
+
+Rebuilt against the MotiveWave macOS SDK (`mwave_sdk.jar` class file
+version 69, Java 25) so the single `dist/TLADeGexDashboard.jar` now
+loads on macOS, Windows and Linux — anywhere MotiveWave ships its
+Java 25-or-newer runtime. Source unchanged from v1.1.
+
+**Why:** the previous build was compiled against the Windows SDK
+(class file v70 / Java 26). MotiveWave on macOS still bundles a Java
+25 runtime, so the Java 26 bytecode was silently skipped at extension
+load time — no warning, no entry under Studies. macOS users were
+effectively locked out.
+
+**How:** the macOS `mwave_sdk.jar` exposes the same `Study` /
+`DataContext` / `Defaults` / `Figure` / descriptor surface as the
+Windows one; only the target bytecode version differs. Compiling
+against the macOS SDK with `javac --release 25` produces a single
+universal jar — backward-compatible with the Java 26 Windows JVM
+(JVMs read older class file versions without issue), forward-
+compatible with whatever Java 25 macOS ships.
+
+**Footprint:** identical (18.7 KB jar, same five inner classes).
+
 ## 2026-06-09 — TLADe patches (v1.1)
 
 Four small robustness fixes on top of Herat's original `v1.0`. Logic

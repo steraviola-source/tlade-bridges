@@ -20,3 +20,6 @@ obj/
 *.pdb
 *.deps.json
 bridges/atas/state_atas.json
+
+# MotiveWave SDK is proprietary — never commit
+mwave_sdk*.jar
