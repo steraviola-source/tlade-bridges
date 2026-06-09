@@ -1,8 +1,14 @@
-# TLADe Bridges
+# TLADe Bridges — Third-Party Indicators and Add-ons
 
-**Bring your own data feed to [TLADe](https://tradelikeadealer.com)** — the GEX analytics terminal for futures and options traders.
+**Bring your own data feed and your own charting platform to
+[TLADe](https://tradelikeadealer.com)** — the GEX analytics terminal
+for futures and options traders.
 
-TLADe Bridges let you connect your local data feed (Interactive Brokers, NinjaTrader, CQG, Rithmic...) to the TLADe terminal for real-time candles, spot prices, and historical data with tick-accurate volume.
+This repo holds the integrations that run **outside** the TLADe
+terminal — on TradingView, NinjaTrader 8, ATAS, MotiveWave and
+broker/feed APIs. For indicators that run **inside** the TLADe
+terminal itself (drawn natively on its LWChart canvas), see
+[`../native/`](native/).
 
 ## How It Works
 
@@ -17,15 +23,39 @@ Your Broker/Platform  ──>  Bridge (runs locally)  ──>  TLADe Terminal
 
 **No data leaves your machine.** The bridge runs 100% locally.
 
-## Available Bridges
+## Available Integrations
 
-| Bridge | Status | Feed | Language |
-|--------|--------|------|----------|
+The integrations below come in two flavours, kept side by side for
+transparency: those **built by the TLADe team** (canonical
+reference implementations) and those **contributed by the community
+and patched by TLADe** (original source preserved, our patches
+documented in each subfolder's `CHANGELOG`).
+
+### TLADe-built
+
+Canonical integrations developed and maintained directly by the
+TLADe team.
+
+| Integration | Status | Feed / Surface | Language |
+|---|---|---|---|
+| [TradingView Pine](bridges/) (in repo terminal/TV-Indicators/) | **Ready** | Pine v6 indicators for ES/SPX/SPY and NQ/NDX/QQQ — published on TradingView | Pine |
 | [Interactive Brokers](bridges/ib/) | **Ready** | TWS / IB Gateway | Python |
-| [NinjaTrader 8](bridges/ninjatrader/) | **Beta** | Rithmic, CQG, Kinetick (via NT8) | C# + Python |
 | [Rithmic](bridges/rithmic/) | **Ready** | R\|Protocol direct (Apex, TopstepTrader, Bulenox, Earn2Trade + 12 other prop firms) | Python |
-| [ATAS](bridges/atas/) | **Ready** | Rithmic / CQG via ATAS Platform — ships 3 indicators (Bridge + GEX Dashboard + Quantum Field Ladder) | C# + Python |
-| [MotiveWave](bridges/motivawe/) | **Ready (Java 26+)** | TLADe levels overlay on MotiveWave charts — community contribution by Herat Acharya, TLADe-patched. Backward-compatible build (Java 17) in progress. | Java |
+| [NinjaTrader 8 bridge](bridges/ninjatrader/) | **Beta** | Rithmic, CQG, Kinetick (via NT8) | C# + Python |
+
+### Community-contributed (TLADe-patched)
+
+Built originally by a community contributor; reviewed line-by-line,
+patched by the TLADe team where needed, and published with the
+original source preserved next to ours. Each integration's
+`original/` folder holds the contributor's untouched code with full
+credit; the root-level source is the TLADe-patched build. See
+`CHANGELOG.md` in each subfolder for the patch list.
+
+| Integration | Status | Surface | Contributor |
+|---|---|---|---|
+| [ATAS](bridges/atas/) | **Ready** | ATAS Platform — Bridge + GEX Dashboard + Quantum Field Ladder (Rithmic / CQG via ATAS data) | Mihai (C# + Python) |
+| [MotiveWave](bridges/motivawe/) | **Ready (Java 26+)** | TLADe levels overlay on MotiveWave charts. Universal Java 17 build in progress. | Herat Acharya (Java) |
 | [CQG](bridges/cqg/) | Wanted | CQG API direct | — |
 
 ## Build Your Own Bridge
