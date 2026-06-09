@@ -25,6 +25,7 @@ Your Broker/Platform  ──>  Bridge (runs locally)  ──>  TLADe Terminal
 | [NinjaTrader 8](bridges/ninjatrader/) | **Beta** | Rithmic, CQG, Kinetick (via NT8) | C# + Python |
 | [Rithmic](bridges/rithmic/) | **Ready** | R\|Protocol direct (Apex, TopstepTrader, Bulenox, Earn2Trade + 12 other prop firms) | Python |
 | [ATAS](bridges/atas/) | **Ready** | Rithmic / CQG via ATAS Platform — ships 3 indicators (Bridge + GEX Dashboard + Quantum Field Ladder) | C# + Python |
+| [MotiveWave](bridges/motivawe/) | **Ready (Java 26+)** | TLADe levels overlay on MotiveWave charts — community contribution by Herat Acharya, TLADe-patched. Backward-compatible build (Java 17) in progress. | Java |
 | [CQG](bridges/cqg/) | Wanted | CQG API direct | — |
 
 ## Build Your Own Bridge
