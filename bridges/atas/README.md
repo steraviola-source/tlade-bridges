@@ -20,6 +20,19 @@ This directory is the **Windows official build** — currently at `TLAdeBridgeAT
 
 ## Patch notes
 
+### Dashboard v3.1.1 — Session AVWAP locally computed (Asia / EU / US / Prev Day)
+Four anchored-VWAP polylines now drawn directly by the indicator from the chart's own bars — same formula as the TLADe TradingView Pine, no round-trip through the cloud. Source = `hlc3 * volume` cumulative, reset at each session anchor in ET:
+- **Asia** (amber) — anchored at 18:00 ET (= futures day start)
+- **EU** (blue) — anchored at 02:00 ET
+- **US** (green) — anchored at 09:30 ET RTH open
+- **Prev Day US** (dim green) — the previous trading day's US AVWAP, promoted at the futures-day rollover and held for the rest of the day
+
+New settings group **"5. Session AVWAP"**: individual on/off toggle for each polyline, line width, label visibility, and a "Show Historical AVWAP (prev days)" switch (off by default = only the current futures day is drawn, keeping the chart clean).
+
+Live-tick safety: when ATAS re-invokes `OnCalculate` on the current bar tick-by-tick, the indicator snapshots the accumulators at the bar's first computation and rolls them back on subsequent calls so `hlc3*vol` is counted exactly once per bar — not once per tick.
+
+> **VP (POC/VAH/VAL)** is still kept out of the indicator on purpose. ATAS's native `VolumeProfile` study computes it from local bars cleanly; stack it alongside the TLADe Dashboard for that view.
+
 ### Dashboard v3.1.0 — Tick-independent scheduler + Breakout / Charm Magnet
 Two changes on the GEX Dashboard indicator:
 
