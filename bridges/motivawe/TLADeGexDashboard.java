@@ -96,6 +96,16 @@ public class TLADeGexDashboard extends Study
   final static String SHOW_GEX       = "showGex";
   final static String SHOW_SYSTEM    = "showSystem";
   final static String SHOW_STRUCTURE = "showStructure";
+  final static String SHOW_BREAKOUT  = "showBreakout";
+  final static String SHOW_CHARM_MAGNET = "showCharmMagnet";
+  // v1.3 — Session AVWAP local compute (= mirrors the Pine indicator)
+  final static String SHOW_AVWAP_ASIA   = "showAvwapAsia";
+  final static String SHOW_AVWAP_EU     = "showAvwapEU";
+  final static String SHOW_AVWAP_US     = "showAvwapUS";
+  final static String SHOW_AVWAP_PD     = "showAvwapPD";
+  final static String SHOW_AVWAP_HIST   = "showAvwapHistorical";
+  final static String AVWAP_LINE_WIDTH  = "avwapLineWidth";
+  final static String SHOW_AVWAP_LABELS = "showAvwapLabels";
   final static String MAX_GEX        = "maxGex";
   final static String SHOW_ONLY_NEAR = "showOnlyNear";
   final static String NEAR_PCT       = "nearPct";
@@ -124,9 +134,10 @@ public class TLADeGexDashboard extends Study
 
   // ---- Auto-fetch constants (mirrors NT8) ------------------------------------------------------
   private static final String API_URL = "https://europe-west1-omggex.cloudfunctions.net/indicatorData";
-  // 6 fetch times per day (ET), as minutes-of-day:
-  // ASIA 18:05, EU 02:05, PRE 08:05, RTH 09:35, OPRANGE 10:35, PWRHOUR 13:05
-  private static final int[] FETCH_MINUTES_ET = {1085, 125, 485, 575, 635, 785};
+  // 6 fetch times per day (ET), as minutes-of-day.
+  // ORDERED ASCENDING (= v1.3 scheduler scans for the smallest slot > nowMins).
+  // 02:05 EU, 08:05 PRE, 09:35 RTH, 10:35 OPRANGE, 13:05 PWRHOUR, 18:05 ASIA.
+  private static final int[] FETCH_MINUTES_ET = {125, 485, 575, 635, 785, 1085};
 
   // ---- Parsed model ----------------------------------------------------------------------------
   private static class LevelEntry
@@ -171,6 +182,17 @@ public class TLADeGexDashboard extends Study
   // never observes a half-cleared/half-filled list while calc rebuilds it.
   private volatile List<DrawLevel> drawLevels = new ArrayList<>();
   private volatile List<DrawProf> drawProfile = new ArrayList<>();
+  // v1.3 — Session AVWAP arrays (one entry per series bar). Populated in
+  // calculateValues, consumed by DashboardFigure.draw. NaN at indices where
+  // the session hadn't started yet (= no accumulation possible).
+  private volatile double[] avwapAsia = new double[0];
+  private volatile double[] avwapEU   = new double[0];
+  private volatile double[] avwapUS   = new double[0];
+  private volatile double[] avwapPD   = new double[0];
+  private volatile long[]   avwapTimes = new long[0]; // millis epoch per bar
+  // Current futures-day Asia anchor in ET millis-of-epoch (= used to clip the
+  // polyline when "Show Historical AVWAP" is off).
+  private volatile long currentAsiaAnchorMs = 0L;
   private int profWidthBars = 70;
   private int profHeightTicks = 8;
 
@@ -187,6 +209,13 @@ public class TLADeGexDashboard extends Study
   private Color profPutColor  = posColor;
 
   // Auto-fetch bookkeeping.
+  // v1.3 — absolute-time scheduler. Replaces the legacy tick-driven
+  // maybeScheduleFetch() that was wired into calculateValues/onBarUpdate
+  // and silently skipped slots when no tick arrived in the 5-minute
+  // matching window (= cash-index charts pre-RTH, futures quiet hours).
+  // The new path schedules exactly 7 fetches per trading day (1 mount + 6
+  // absolute ET slots) regardless of tick activity.
+  private volatile java.util.concurrent.ScheduledExecutorService scheduler;
   private volatile String fetchedData = null; // set by background thread, consumed on next calc
   private int lastFetchMinuteET = -1;
   private long lastFetchTimeMs = 0L;
@@ -240,6 +269,17 @@ public class TLADeGexDashboard extends Study
     visGrp.addRow(new BooleanDescriptor(SHOW_GEX, "Show GEX Levels (CW/PW/GL)", true));
     visGrp.addRow(new BooleanDescriptor(SHOW_SYSTEM, "Show System Levels (ZG/MP/EH/EL/VH/VL)", true));
     visGrp.addRow(new BooleanDescriptor(SHOW_STRUCTURE, "Show Structure Levels (PDH/PDL/PWH/PWL)", true));
+    visGrp.addRow(new BooleanDescriptor(SHOW_BREAKOUT, "Show Breakout Areas (BL/BS)", true));
+    visGrp.addRow(new BooleanDescriptor(SHOW_CHARM_MAGNET, "Show Charm Magnet (CM)", true));
+
+    SettingGroup avwapGrp = dataTab.addGroup("Session AVWAP");
+    avwapGrp.addRow(new BooleanDescriptor(SHOW_AVWAP_ASIA, "Show Session AVWAP — Asia", true));
+    avwapGrp.addRow(new BooleanDescriptor(SHOW_AVWAP_EU,   "Show Session AVWAP — EU",   true));
+    avwapGrp.addRow(new BooleanDescriptor(SHOW_AVWAP_US,   "Show Session AVWAP — US",   true));
+    avwapGrp.addRow(new BooleanDescriptor(SHOW_AVWAP_PD,   "Show Session AVWAP — Prev Day US", true));
+    avwapGrp.addRow(new BooleanDescriptor(SHOW_AVWAP_HIST, "Show Historical AVWAP (prev days)", false));
+    avwapGrp.addRow(new IntegerDescriptor(AVWAP_LINE_WIDTH, "AVWAP line width", 2, 1, 4, 1));
+    avwapGrp.addRow(new BooleanDescriptor(SHOW_AVWAP_LABELS, "Show AVWAP labels", true));
     visGrp.addRow(new IntegerDescriptor(MAX_GEX, "Max GEX Levels (999=All)", 10, 1, 999, 1)
         .setDescription("Caps GEX walls shown, split above/below price. Nearest above & below "
             + "are always kept."));
@@ -315,8 +355,71 @@ public class TLADeGexDashboard extends Study
   public void onLoad(Defaults defaults)
   {
     super.onLoad(defaults);
-    if (getSettings().getBoolean(AUTO_FETCH, true))
+    if (getSettings().getBoolean(AUTO_FETCH, true)) {
       startFetch(true);
+      startScheduler();
+    }
+  }
+
+  /** v1.3 — daemon-thread scheduler. Fires exactly at the next ET slot,
+   * chains itself, lives until the JVM exits (= MotiveWave SDK has no
+   * teardown callback for studies, so we lean on daemon threads). */
+  private synchronized void startScheduler()
+  {
+    if (scheduler != null) return;
+    java.util.concurrent.ScheduledExecutorService s =
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+          Thread t = new Thread(r, "TLADe-MW-scheduler");
+          t.setDaemon(true);
+          return t;
+        });
+    scheduler = s;
+    scheduleNextFetch();
+  }
+
+  private void scheduleNextFetch()
+  {
+    java.util.concurrent.ScheduledExecutorService s = scheduler;
+    if (s == null) return;
+    long delayMs = msUntilNextSlot();
+    s.schedule(() -> {
+      try {
+        if (getSettings().getBoolean(AUTO_FETCH, true)) {
+          // Resolve which slot just fired (= absolute time, so we know).
+          java.time.ZonedDateTime et;
+          try { et = java.time.ZonedDateTime.now(java.time.ZoneId.of("America/New_York")); }
+          catch (Exception e) { et = null; }
+          if (et != null) {
+            int etMins = et.getHour() * 60 + et.getMinute();
+            lastFetchMinuteET = etMins;
+          }
+          lastFetchTimeMs = System.currentTimeMillis();
+          startFetch(false);
+        }
+      } finally {
+        scheduleNextFetch(); // chain to next absolute slot
+      }
+    }, delayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+  }
+
+  private static long msUntilNextSlot()
+  {
+    java.time.ZonedDateTime et;
+    try { et = java.time.ZonedDateTime.now(java.time.ZoneId.of("America/New_York")); }
+    catch (Exception e) { return 60_000L; } // fallback: try again in 1 min
+    int nowMins = et.getHour() * 60 + et.getMinute();
+    int nextDiffMins = -1;
+    for (int slot : FETCH_MINUTES_ET) {
+      if (slot > nowMins) { nextDiffMins = slot - nowMins; break; }
+    }
+    if (nextDiffMins < 0) {
+      // No more slots today → wrap to first slot tomorrow.
+      nextDiffMins = (1440 - nowMins) + FETCH_MINUTES_ET[0];
+    }
+    long ms = (long) nextDiffMins * 60_000L
+            - (long) et.getSecond() * 1000L
+            + 1000L; // 1s buffer so we land just after the slot boundary
+    return Math.max(1000L, ms);
   }
 
   // ================================================================================================
@@ -341,8 +444,9 @@ public class TLADeGexDashboard extends Study
       lastData = pending;
     }
 
-    // Schedule the next time-window fetch (non-blocking).
-    maybeScheduleFetch();
+    // v1.3 — Fetch lifecycle is now owned by the absolute-time scheduler
+    // (onLoad → startScheduler). The legacy maybeScheduleFetch() below is
+    // kept as dead code; calculateValues no longer drives fetches.
 
     // Effective data: fetched payload if we have one, else the manual paste.
     String dataStr = (lastData != null) ? lastData : getSettings().getString(GEX_DATA, "");
@@ -448,6 +552,8 @@ public class TLADeGexDashboard extends Study
         boolean gex = isGex(lvl.type);
         boolean sys = isSystem(lvl.type);
         boolean struct = isStructure(lvl.type);
+        boolean breakout = isBreakout(lvl.type);
+        boolean charm    = isCharmMagnet(lvl.type);
 
         boolean passesThreshold = !enableThresh || !gex || lvl.magnitude == 0.0
             || lvl.magnitude >= threshold;
@@ -463,6 +569,8 @@ public class TLADeGexDashboard extends Study
           else if (!isAbove && gexBelowDrawn < halfMax) shouldShow = true;
         } else if (sys && showSystem) shouldShow = true;
         else if (struct && showStructure) shouldShow = true;
+        else if (breakout && getSettings().getBoolean(SHOW_BREAKOUT, true)) shouldShow = true;
+        else if (charm    && getSettings().getBoolean(SHOW_CHARM_MAGNET, true)) shouldShow = true;
 
         if (!shouldShow || !inRange) continue;
 
@@ -509,6 +617,12 @@ public class TLADeGexDashboard extends Study
     // always reads a fully-built model (or the previous one), never a partial.
     drawLevels = newLevels;
     drawProfile = newProfile;
+
+    // v1.3 — populate the 4 Session AVWAP arrays from the same DataSeries.
+    // Runs after the level model so a slow PA → AVWAP recompute can't delay
+    // the GEX lines from showing up.
+    try { computeAvwapForSeries(series); }
+    catch (Exception ignore) { /* keep the previous AVWAP arrays on failure */ }
   }
 
   /** Live bars: nudge a redraw so the right-edge anchored figure stays put. */
@@ -521,7 +635,8 @@ public class TLADeGexDashboard extends Study
       recalculate(ctx);
       return;
     }
-    maybeScheduleFetch();
+    // v1.3 — fetch scheduling is now owned by the absolute-time scheduler.
+    // onBarUpdate only nudges the redraw so the figure stays right-edge-anchored.
     notifyRedraw();
   }
 
@@ -664,6 +779,11 @@ public class TLADeGexDashboard extends Study
   {
     return t.equals("PDH") || t.equals("PDL") || t.equals("PWH") || t.equals("PWL");
   }
+  // v1.3 — two new families surfaced by the extended cloud payload.
+  // BL / BS = Breakout Areas (long / short, from PA engine).
+  // CM = Charm Magnet (strike where charm flow magnetises price).
+  private static boolean isBreakout(String t) { return t.equals("BL") || t.equals("BS"); }
+  private static boolean isCharmMagnet(String t) { return t.equals("CM"); }
 
   private static boolean nearlyEqual(double a, double b)
   {
@@ -699,6 +819,154 @@ public class TLADeGexDashboard extends Study
     } else { // Theme Colors (inverted: call=neg, put=pos — matches TV)
       profCallColor = negColor;
       profPutColor  = posColor;
+    }
+  }
+
+  // ================================================================================================
+  // Session AVWAP — local compute (v1.3, mirrors the Pine indicator)
+  // ================================================================================================
+
+  /** Populate the 4 AVWAP arrays from the DataSeries. Called from calculateValues
+   * after the level model is built. hlc3 * volume cumulative, reset at each
+   * session anchor in ET. Asia anchor at 18:00 ET = futures day start; on each
+   * new Asia session the previous US AVWAP is "promoted" to PD (Pine pattern). */
+  private void computeAvwapForSeries(DataSeries series)
+  {
+    int n = series.size();
+    if (n <= 0) {
+      avwapAsia = avwapEU = avwapUS = avwapPD = new double[0];
+      avwapTimes = new long[0];
+      currentAsiaAnchorMs = 0L;
+      return;
+    }
+    double[] aA = new double[n];
+    double[] aE = new double[n];
+    double[] aU = new double[n];
+    double[] aP = new double[n];
+    long[]   aT = new long[n];
+    for (int i = 0; i < n; i++) { aA[i] = aE[i] = aU[i] = aP[i] = Double.NaN; }
+
+    double sumPVA = 0, sumVA = 0;
+    double sumPVE = 0, sumVE = 0;
+    double sumPVU = 0, sumVU = 0;
+    double sumPVPD = 0, sumVPD = 0;
+    long lastAsiaAnchor = 0, lastEUAnchor = 0, lastUSAnchor = 0;
+    long lastSeenAsia = 0;
+    java.time.ZoneId etZone = java.time.ZoneId.of("America/New_York");
+
+    for (int i = 0; i < n; i++) {
+      long t = series.getStartTime(i);
+      aT[i] = t;
+      double h = series.getHigh(i), l = series.getLow(i), c = series.getClose(i);
+      double v = series.getVolume(i);
+      if (Double.isNaN(h) || Double.isNaN(l) || Double.isNaN(c) || Double.isNaN(v)) continue;
+      double hlc3 = (h + l + c) / 3.0;
+
+      java.time.ZonedDateTime et = java.time.Instant.ofEpochMilli(t).atZone(etZone);
+      long asiaAnchor = asiaAnchorFor(et);
+      long euAnchor   = euAnchorFor(et);
+      long usAnchor   = usAnchorFor(et);
+
+      if (asiaAnchor != lastAsiaAnchor) {
+        sumPVPD = sumPVU; sumVPD = sumVU;     // promote US → PD
+        sumPVA = 0; sumVA = 0;
+        lastAsiaAnchor = asiaAnchor;
+        lastSeenAsia = asiaAnchor;
+      }
+      if (euAnchor != lastEUAnchor) { sumPVE = 0; sumVE = 0; lastEUAnchor = euAnchor; }
+      if (usAnchor != lastUSAnchor) { sumPVU = 0; sumVU = 0; lastUSAnchor = usAnchor; }
+
+      if (t >= asiaAnchor) { sumPVA += hlc3 * v; sumVA += v; }
+      if (t >= euAnchor)   { sumPVE += hlc3 * v; sumVE += v; }
+      if (t >= usAnchor)   { sumPVU += hlc3 * v; sumVU += v; }
+
+      if (sumVA > 0)  aA[i] = sumPVA / sumVA;
+      if (sumVE > 0)  aE[i] = sumPVE / sumVE;
+      if (sumVU > 0)  aU[i] = sumPVU / sumVU;
+      if (sumVPD > 0) aP[i] = sumPVPD / sumVPD;
+    }
+
+    avwapAsia = aA; avwapEU = aE; avwapUS = aU; avwapPD = aP;
+    avwapTimes = aT;
+    currentAsiaAnchorMs = lastSeenAsia;
+  }
+
+  private static long asiaAnchorFor(java.time.ZonedDateTime et)
+  {
+    java.time.ZonedDateTime t18 = et.withHour(18).withMinute(0).withSecond(0).withNano(0);
+    if (et.compareTo(t18) >= 0) return t18.toInstant().toEpochMilli();
+    return t18.minusDays(1).toInstant().toEpochMilli();
+  }
+  private static long euAnchorFor(java.time.ZonedDateTime et)
+  {
+    java.time.ZonedDateTime t02 = et.withHour(2).withMinute(0).withSecond(0).withNano(0);
+    if (et.compareTo(t02) >= 0) return t02.toInstant().toEpochMilli();
+    return t02.minusDays(1).toInstant().toEpochMilli();
+  }
+  private static long usAnchorFor(java.time.ZonedDateTime et)
+  {
+    java.time.ZonedDateTime t0930 = et.withHour(9).withMinute(30).withSecond(0).withNano(0);
+    if (et.compareTo(t0930) >= 0) return t0930.toInstant().toEpochMilli();
+    return t0930.minusDays(1).toInstant().toEpochMilli();
+  }
+
+  /** Draw the 4 polylines on the chart. Called from DashboardFigure.draw. */
+  private void paintAvwapPolylines(Graphics2D gc, DrawContext ctx, Rectangle b)
+  {
+    double[] aA = avwapAsia, aE = avwapEU, aU = avwapUS, aP = avwapPD;
+    long[]   times = avwapTimes;
+    int n = times.length;
+    if (n == 0 || aA.length != n || aE.length != n || aU.length != n || aP.length != n) return;
+
+    boolean showHist = getSettings().getBoolean(SHOW_AVWAP_HIST, false);
+    long clipFrom = showHist ? Long.MIN_VALUE : currentAsiaAnchorMs;
+    int width = getSettings().getInteger(AVWAP_LINE_WIDTH, 2);
+
+    if (getSettings().getBoolean(SHOW_AVWAP_ASIA, true))
+      drawOneAvwap(gc, ctx, b, times, aA, clipFrom, new Color(0xF5, 0x9E, 0x0B), "Asia", width);
+    if (getSettings().getBoolean(SHOW_AVWAP_EU, true))
+      drawOneAvwap(gc, ctx, b, times, aE, clipFrom, new Color(0x3B, 0x82, 0xF6), "EU", width);
+    if (getSettings().getBoolean(SHOW_AVWAP_US, true))
+      drawOneAvwap(gc, ctx, b, times, aU, clipFrom, new Color(0x22, 0xC5, 0x5E), "US", width);
+    if (getSettings().getBoolean(SHOW_AVWAP_PD, true))
+      drawOneAvwap(gc, ctx, b, times, aP, clipFrom, new Color(0x6E, 0xE7, 0xB7), "PD", width);
+  }
+
+  private void drawOneAvwap(Graphics2D gc, DrawContext ctx, Rectangle b,
+                            long[] times, double[] vals, long clipFromMs,
+                            Color color, String label, int width)
+  {
+    if (vals == null || vals.length == 0) return;
+    gc.setColor(color);
+    gc.setStroke(new BasicStroke(width));
+    int prevX = Integer.MIN_VALUE, prevY = Integer.MIN_VALUE;
+    int lastValidX = Integer.MIN_VALUE, lastValidY = Integer.MIN_VALUE;
+    boolean haveLast = false;
+
+    for (int i = 0; i < vals.length; i++) {
+      long t = times[i];
+      if (t < clipFromMs) { prevX = Integer.MIN_VALUE; continue; }
+      double v = vals[i];
+      if (Double.isNaN(v)) { prevX = Integer.MIN_VALUE; continue; }
+      int x = ctx.translateTime(t);
+      int y = ctx.translateValue(v);
+      if (prevX != Integer.MIN_VALUE) gc.drawLine(prevX, prevY, x, y);
+      prevX = x; prevY = y;
+      lastValidX = x; lastValidY = y;
+      haveLast = true;
+    }
+
+    if (haveLast && getSettings().getBoolean(SHOW_AVWAP_LABELS, true)) {
+      Font f = new Font("Arial", Font.PLAIN, 11);
+      gc.setFont(f);
+      FontMetrics fm = gc.getFontMetrics();
+      String txt = " " + label + " ";
+      int tw = fm.stringWidth(txt);
+      int th = fm.getHeight();
+      gc.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 180));
+      gc.fillRect(lastValidX + 2, lastValidY - th / 2, tw + 4, th + 2);
+      gc.setColor(Color.BLACK);
+      gc.drawString(txt, lastValidX + 4, lastValidY - th / 2 + fm.getAscent());
     }
   }
 
@@ -806,6 +1074,10 @@ public class TLADeGexDashboard extends Study
       // Profile first (underlay), then level lines/labels on top.
       if (!drawProfile.isEmpty())
         paintProfile(gc, ctx, b);
+
+      // v1.3 — Session AVWAP polylines below the GEX levels so the horizontal
+      // wall lines stay visually dominant over the slower-moving curves.
+      paintAvwapPolylines(gc, ctx, b);
 
       if (!drawLevels.isEmpty())
         paintLevels(gc, ctx, b);
@@ -936,6 +1208,10 @@ public class TLADeGexDashboard extends Study
       case "EL": return new Color(0x1e, 0x90, 0xff); // DodgerBlue
       case "VH":
       case "VL": return new Color(0x80, 0x80, 0x80); // Gray
+      // v1.3 — Breakout / Charm Magnet (palettes chosen distinct from CW/PW)
+      case "BL": return new Color(0x10, 0xB9, 0x81); // emerald — Breakout Long
+      case "BS": return new Color(0xF4, 0x3F, 0x5E); // rose    — Breakout Short
+      case "CM": return new Color(0xC0, 0x73, 0xFF); // violet  — Charm Magnet
       default:
         if (isStructure(lvl.type)) return new Color(0xA9, 0xA9, 0xA9); // DarkGray (#A9A9A9, matches NT8 Brushes.DarkGray)
         return new Color(0x80, 0x80, 0x80); // Gray
