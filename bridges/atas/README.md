@@ -20,6 +20,33 @@ This directory is the **Windows official build** — currently at `TLAdeBridgeAT
 
 ## Patch notes
 
+### Dashboard v3.1.0 — Tick-independent scheduler + Breakout / Charm Magnet
+Two changes on the GEX Dashboard indicator:
+
+**1. Sync fix (= "I have to remove and re-add the indicator to get an update")**
+
+v3.0 drove the 6 daily auto-fetches from inside `OnCalculate`. That callback only fires when a tick arrives, so:
+- On cash-index charts (SPX/NDX), zero ticks outside RTH → all 3 pre-market slots (ASIA 18:05, EU 02:05, PRE 08:05 ET) were silently skipped.
+- On futures charts (ES/NQ), Globex quiet hours can have ticks ≥ 6 min apart, easily wider than the legacy 5-minute "did we just pass a slot?" window.
+
+v3.1 introduces a real `System.Threading.CancellationTokenSource`-backed scheduler started in `OnInitialize` and torn down in `OnDispose`. It:
+- runs **independently of OnCalculate** (= zero dependency on tick rate)
+- fires **exactly 7 fetches per trading day**: 1 at mount + 6 absolute ET slots (02:05 EU, 08:05 PRE, 09:35 RTH, 10:35 OR, 13:05 CLOSE, 18:05 ASIA)
+- correctly picks the *next ascending* slot regardless of the time the indicator is added (the v3.1.0-pre subtle bug — slot array iteration order — was caught in testing and fixed before release).
+
+`tlade_gex.log` now shows lifecycle lines like `Scheduler: sleeping 235.4min until next ET slot` confirming the next firing window.
+
+**2. Two new level families in the payload**
+
+The cloud `indicatorData` endpoint was extended to emit the two on-chain-derived levels the terminal renders that the dashboard didn't have:
+
+- **`CM` — Charm Magnet** (violet line). The strike where charm flow magnetises price, surfaced from the volatility cascade. Matches the "Magnete Charm" panel in the terminal's Market Pulse. Present in the payload when the snapshot's `magnete_charm.tipo` is `Magnet` / `Pressure` / `Neutral` (skipped when `N/D`).
+- **`BL` / `BS` — Breakout Areas** (emerald / rose lines). Recent breakout zones detected by the PA engine. `BL` = long breakout, `BS` = short breakout.
+
+Two new toggles in the **3. Visibility** group: `Show Breakout Areas (BL/BS)` and `Show Charm Magnet (CM)`.
+
+> **Volume Profile and Session AVWAP** were intentionally **NOT** added to the payload. ATAS already ships native `VolumeProfile` and `VWAP` studies that compute these from the chart's own bars — stack them alongside the TLADe Dashboard on the same chart for the same view the TLADe terminal renders. Same pattern as Pine on TradingView.
+
 ### Bridge v2.4.1 — Closed-bar timestamp fix
 The Bridge Protocol §chart_data expects `time` as Unix seconds (integer); the previous version was sending ISO strings, which the terminal parsed as NaN and collapsed every closed 5m bar to a degenerate O=H=L=C tick on the chart. `PostBar()` now emits `time` as `((DateTimeOffset)cd.Time).ToUnixTimeSeconds()`.
 

@@ -43,6 +43,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Media;
 using ATAS.Indicators;
@@ -69,7 +70,12 @@ namespace ATAS.Indicators.Technical
         };
         private const string API_URL =
             "https://europe-west1-omggex.cloudfunctions.net/indicatorData";
-        private static readonly int[] FETCH_MINUTES_ET = { 1085, 125, 485, 575, 635, 785 };
+        // Slot ET — minuti dalla mezzanotte ET, ORDINATO ASCENDENTE.
+        // L'ordering è critico per TimeUntilNextSlot (v3.1 scheduler), che
+        // itera e breakja sul primo slot > nowMins. Se non ordinato, salta
+        // tutti gli slot dello stesso giorno e va al successivo "futures day".
+        // 125=02:05 EU, 485=08:05 PRE, 575=09:35 RTH, 635=10:35 OR, 785=13:05 CLOSE, 1085=18:05 ASIA.
+        private static readonly int[] FETCH_MINUTES_ET = { 125, 485, 575, 635, 785, 1085 };
 
         private static readonly string _logPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -84,6 +90,12 @@ namespace ATAS.Indicators.Technical
         private int      _lastFetchMinuteEt  = -1;
         private DateTime _lastFetchUtc       = DateTime.MinValue;
         private bool     _initialFetchTried  = false;
+        // v3.1 — Scheduler indipendente dai tick. Six absolute ET slots/day
+        // + 1 fetch al mount = 7 chiamate/giorno deterministiche. Sostituisce
+        // il legacy tick-driven path che falliva silenziosamente nelle finestre
+        // pre-RTH quando il chart non riceveva tick (cash index, futures
+        // quiet hours, weekend). See TryScheduledFetch — kept as dead code.
+        private CancellationTokenSource _schedulerCts;
 
         private RenderFont _fn;
         private readonly RenderStringFormat _sfL =
@@ -133,6 +145,17 @@ namespace ATAS.Indicators.Technical
 
         [Display(Name = "Show Structure (PDH/PDL/PWH/PWL)", GroupName = "3. Visibility", Order = 3)]
         public bool ShowStructureLevels { get; set; } = true;
+
+        [Display(Name = "Show Breakout Areas (BL/BS)", GroupName = "3. Visibility", Order = 7)]
+        public bool ShowBreakoutLevels { get; set; } = true;
+
+        [Display(Name = "Show Charm Magnet (CM)", GroupName = "3. Visibility", Order = 8)]
+        public bool ShowCharmMagnet { get; set; } = true;
+
+        // VP (POC/VAH/VAL) and Session AVWAP are intentionally NOT in the TLADe
+        // payload: ATAS already ships built-in VolumeProfile and VWAP studies
+        // that compute these directly from the chart's own bars. Stack those
+        // alongside the TLADe Dashboard for the same view the terminal renders.
 
         [Display(Name = "Show labels", GroupName = "3. Visibility", Order = 4)]
         public bool ShowLabels { get; set; } = true;
@@ -289,21 +312,92 @@ namespace ATAS.Indicators.Technical
                     return;
                 }
 
-                if (!AutoFetch) return;
-
-                if (!_initialFetchTried)
-                {
-                    _initialFetchTried = true;
-                    Log($"OnCalc triggering initial fetch on bar={bar}");
-                    Task.Run(() => FetchOnce());
-                    return;
-                }
-                TryScheduledFetch();
+                // Fetch lifecycle is now owned by the absolute-time scheduler
+                // (OnInitialize → RunScheduler). OnCalculate only handles the
+                // manual-paste override path above.
             }
             catch (Exception ex)
             {
                 Log($"OnCalculate EX: {ex.GetType().Name}: {ex.Message}");
             }
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        //  LIFECYCLE — absolute-time scheduler (v3.1)
+        // ──────────────────────────────────────────────────────────────────────
+
+        protected override void OnInitialize()
+        {
+            base.OnInitialize();
+            Log($"OnInitialize: starting scheduler (autoFetch={AutoFetch})");
+            if (!AutoFetch) return;
+            _schedulerCts?.Cancel();
+            _schedulerCts = new CancellationTokenSource();
+            // 1 immediate fetch at mount + 6 scheduled fetches/day at absolute
+            // ET slots. Independent from OnCalculate tick rate — fires even
+            // when the chart receives zero ticks (cash index out of RTH,
+            // futures quiet hours, weekend).
+            _ = RunScheduler(_schedulerCts.Token);
+        }
+
+        protected override void OnDispose()
+        {
+            try { _schedulerCts?.Cancel(); } catch { }
+            _schedulerCts = null;
+            Log("OnDispose: scheduler cancelled");
+            base.OnDispose();
+        }
+
+        private async Task RunScheduler(CancellationToken ct)
+        {
+            try
+            {
+                // Mount fetch first.
+                Log("Scheduler: mount fetch");
+                await FetchOnce().ConfigureAwait(false);
+
+                while (!ct.IsCancellationRequested)
+                {
+                    var delay = TimeUntilNextSlot(GetEtTime());
+                    Log($"Scheduler: sleeping {delay.TotalMinutes:F1}min until next ET slot");
+                    try { await Task.Delay(delay, ct).ConfigureAwait(false); }
+                    catch (TaskCanceledException) { return; }
+                    if (ct.IsCancellationRequested) return;
+                    if (!AutoFetch) { Log("Scheduler: AutoFetch off — pausing 5min"); await Task.Delay(TimeSpan.FromMinutes(5), ct).ConfigureAwait(false); continue; }
+                    Log("Scheduler: scheduled fetch");
+                    await FetchOnce().ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Scheduler EX: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        // Minutes until the next ET fetch slot. If we're past the last slot of
+        // the day, wraps to the first slot of the next day. Adds a 1s buffer so
+        // we land *just after* the slot boundary and the cloud has it ready.
+        private TimeSpan TimeUntilNextSlot(DateTime nowEt)
+        {
+            int nowMins = nowEt.Hour * 60 + nowEt.Minute;
+            int? next = null;
+            foreach (var slot in FETCH_MINUTES_ET)
+            {
+                if (slot > nowMins) { next = slot; break; }
+            }
+            int diffMins;
+            if (next.HasValue)
+            {
+                diffMins = next.Value - nowMins;
+            }
+            else
+            {
+                // No more slots today — wrap to first slot of next day.
+                diffMins = (1440 - nowMins) + FETCH_MINUTES_ET[0];
+            }
+            return TimeSpan.FromMinutes(diffMins)
+                 - TimeSpan.FromSeconds(nowEt.Second)
+                 + TimeSpan.FromSeconds(1);
         }
 
         private void TryScheduledFetch()
@@ -628,9 +722,11 @@ namespace ATAS.Indicators.Technical
                 foreach (var lvl in snap)
                 {
                     double y = ConvertPrice(lvl.RawStrike);
-                    bool isGex       = IsGex(lvl.Type);
-                    bool isSystem    = IsSystem(lvl.Type);
-                    bool isStructure = IsStructure(lvl.Type);
+                    bool isGex          = IsGex(lvl.Type);
+                    bool isSystem       = IsSystem(lvl.Type);
+                    bool isStructure    = IsStructure(lvl.Type);
+                    bool isBreakout     = IsBreakout(lvl.Type);
+                    bool isCharm        = IsCharmMagnet(lvl.Type);
                     bool passes = !EnableThreshold || !isGex ||
                                   lvl.Magnitude == 0 || lvl.Magnitude >= GexThreshold;
                     bool isProtected = isGex && (NearlyEqual(lvl.RawStrike, closestAbove) ||
@@ -647,6 +743,8 @@ namespace ATAS.Indicators.Technical
                     }
                     else if (isSystem    && ShowSystemLevels)    show = true;
                     else if (isStructure && ShowStructureLevels) show = true;
+                    else if (isBreakout  && ShowBreakoutLevels)  show = true;
+                    else if (isCharm     && ShowCharmMagnet)     show = true;
 
                     if (!show) continue;
 
@@ -669,6 +767,10 @@ namespace ATAS.Indicators.Technical
                     else if (lvl.Type == "MP") color = DColor.Orange;
                     else if (lvl.Type == "EH" || lvl.Type == "EL") color = DColor.Gold;
                     else if (lvl.Type == "VH" || lvl.Type == "VL") color = DColor.FromArgb(100, 180, 255);
+                    // v3.1 — new families (palettes chosen to be distinct from CW/PW red/green)
+                    else if (lvl.Type == "BL") color = DColor.FromArgb(0x10, 0xB9, 0x81);  // emerald — Breakout Long
+                    else if (lvl.Type == "BS") color = DColor.FromArgb(0xF4, 0x3F, 0x5E);  // rose    — Breakout Short
+                    else if (lvl.Type == "CM") color = DColor.FromArgb(0xC0, 0x73, 0xFF);  // violet  — Charm Magnet
                     else color = DColor.DimGray;
 
                     // Compute line start: scaled by magnitude for walls, full-width otherwise
@@ -800,6 +902,14 @@ namespace ATAS.Indicators.Technical
         private static bool IsGex(string t)       => t == "CW" || t == "PW" || t == "GL";
         private static bool IsSystem(string t)    => t == "ZG" || t == "MP" || t == "EH" ||
                                                      t == "EL" || t == "VH" || t == "VL";
+        // v3.1 — 2 new families surfaced by the extended cloud payload.
+        // The parser is generic (= any type tag from L: lands in _levels) so
+        // we only need to classify + color them here.
+        // VP (POC/VAH/VAL) and Session AVWAP are NOT in the payload by design:
+        // ATAS native VolumeProfile + VWAP studies compute those from local
+        // chart bars — no point duplicating them here.
+        private static bool IsBreakout(string t)       => t == "BL"  || t == "BS";
+        private static bool IsCharmMagnet(string t)    => t == "CM";
         private static bool IsStructure(string t) => t == "PDH" || t == "PDL" ||
                                                      t == "PWH" || t == "PWL";
 
