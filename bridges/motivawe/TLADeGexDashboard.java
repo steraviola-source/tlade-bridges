@@ -131,6 +131,7 @@ public class TLADeGexDashboard extends Study
   final static String API_KEY        = "apiKey";
 
   final static String SHOW_STATUS    = "showStatus";
+  final static String STATUS_POS     = "statusPos";   // TL / TR / BL / BR
 
   // ---- Auto-fetch constants (mirrors NT8) ------------------------------------------------------
   private static final String API_URL = "https://europe-west1-omggex.cloudfunctions.net/indicatorData";
@@ -324,9 +325,17 @@ public class TLADeGexDashboard extends Study
     profGrp.addRow(new IntegerDescriptor(MAX_PROFILE, "Max Profile Rows", 1500, 10, 5000, 1));
 
     SettingGroup devGrp = profTab.addGroup("Developer");
-    devGrp.addRow(new BooleanDescriptor(SHOW_STATUS, "Show Status / Diagnostics Banner", true)
-        .setDescription("Top-left overlay showing data state, parsed/visible counts, spot and "
-            + "converted price range. Turn off once levels render correctly."));
+    devGrp.addRow(new BooleanDescriptor(SHOW_STATUS, "Show Status Banner", true)
+        .setDescription("Compact overlay: ticker, data mode (live/delayed), visible level "
+            + "count and the last auto-refresh time (ET)."));
+    java.util.List<NVP> statusPositions = new java.util.ArrayList<>();
+    statusPositions.add(new NVP("Top Left", "TL"));
+    statusPositions.add(new NVP("Top Right", "TR"));
+    statusPositions.add(new NVP("Bottom Left", "BL"));
+    statusPositions.add(new NVP("Bottom Right", "BR"));
+    devGrp.addRow(new DiscreteDescriptor(STATUS_POS, "Status Banner Position", "BL", statusPositions)
+        .setDescription("Corner where the banner is drawn. Default Bottom Left to clear the "
+            + "MotiveWave indicator list (top-left) and the right-edge GEX profile."));
 
     // --- Runtime --------------------------------------------------------------------------------
     RuntimeDescriptor rd = createRD();
@@ -1108,8 +1117,12 @@ public class TLADeGexDashboard extends Study
       int bodyH  = bfm.getHeight();
       int boxW = w + padX * 2;
       int boxH = titleH + (lines.length - 1) * bodyH + padY * 2;
-      int x = b.x + 8;
-      int y = b.y + 8;
+      int m = 8;
+      String pos = getSettings().getString(STATUS_POS, "BL");
+      boolean right  = pos.equals("TR") || pos.equals("BR");
+      boolean bottom = pos.equals("BL") || pos.equals("BR");
+      int x = right  ? b.x + b.width  - boxW - m : b.x + m;
+      int y = bottom ? b.y + b.height - boxH - m : b.y + m;
 
       // Opaque rounded panel + amber border so it stays legible over any chart.
       gc.setColor(new Color(18, 22, 31, 242));

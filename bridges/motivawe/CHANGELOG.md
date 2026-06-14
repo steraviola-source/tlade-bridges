@@ -23,6 +23,9 @@ sans-serif panel, opaque rounded background, amber accent, antialiased,
 showing user-relevant info only: `TLADe GEX · {ticker}` / `{LIVE|DELAYED} ·
 {N} levels` / `updated {HH:mm} ET`. The last-fetch ET timestamp is new, so
 users can see at a glance whether the auto-refresh fired at each session.
+The banner is positionable via a **Status Banner Position** setting
+(Top/Bottom × Left/Right); default Bottom Left so it clears the MotiveWave
+indicator list (top-left) and the right-edge GEX profile.
 
 ## 2026-06-12 — Tick-independent scheduler + Charm Magnet / Breakout + Session AVWAP (v1.3)
 
