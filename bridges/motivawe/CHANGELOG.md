@@ -1,5 +1,29 @@
 # CHANGELOG — MotiveWave Indicator
 
+## 2026-06-14 — Status banner redesign + v1.3 build fix (v1.3.1)
+
+Two changes on `TLADeGexDashboard.java`.
+
+### 1. Build fix — v1.3 never compiled, so the shipped jar was stale
+
+The v1.3 commit called `computeAvwapForSeries(series)` from inside
+`buildDrawModel(double spot, DataContext ctx)`, where `series` is not in
+scope (it lives in `calculateValues`). `javac` failed, so the published
+`dist/` jar and the GitHub release asset were still the pre-v1.3 build —
+no scheduler, no Charm Magnet, no Session AVWAP for any user. Fixed by
+deriving the series from the context: `computeAvwapForSeries(ctx.getDataSeries())`.
+The jar now compiles and carries all v1.3 features.
+
+### 2. Status banner redesign — readable, user-facing
+
+The top-left box was an 11px monospaced developer dump (`dataChars`,
+`parsed`/`visible` counts, `levelSpan`) in light blue on a semi-transparent
+background — unreadable over a busy chart. Replaced with a 14/13px
+sans-serif panel, opaque rounded background, amber accent, antialiased,
+showing user-relevant info only: `TLADe GEX · {ticker}` / `{LIVE|DELAYED} ·
+{N} levels` / `updated {HH:mm} ET`. The last-fetch ET timestamp is new, so
+users can see at a glance whether the auto-refresh fired at each session.
+
 ## 2026-06-12 — Tick-independent scheduler + Charm Magnet / Breakout + Session AVWAP (v1.3)
 
 Three changes on `TLADeGexDashboard.java`. All pure Java, no native code,

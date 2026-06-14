@@ -202,6 +202,9 @@ public class TLADeGexDashboard extends Study
   // Diagnostic snapshot (shown by the status banner when SHOW_STATUS is on).
   private volatile String statusText = "TLADe GEX: initializing…";
 
+  // Last successful fetch time as ET HH:mm, shown in the status banner.
+  private volatile String lastFetchEt = "—";
+
   // Theme / bar brushes resolved from settings (recomputed on each rebuild).
   private Color posColor = new Color(0x22, 0xc5, 0x5e);
   private Color negColor = new Color(0xef, 0x44, 0x44);
@@ -468,31 +471,20 @@ public class TLADeGexDashboard extends Study
   /** Compose the diagnostic snapshot shown by the status banner. */
   private void buildStatus(DataSeries series, Instrument instr, double spot, String dataStr)
   {
-    int rawLen = (dataStr == null) ? 0 : dataStr.trim().length();
     String ticker = getSettings().getString(DISPLAY_TICKER, "ES");
-
-    // Converted price span of all parsed levels (helps spot a range mismatch).
-    double lo = Double.MAX_VALUE, hi = -Double.MAX_VALUE;
-    for (LevelEntry l : levels) {
-      double y = convertPrice(l.esStrike);
-      lo = Math.min(lo, y); hi = Math.max(hi, y);
-    }
-    String span = levels.isEmpty() ? "n/a"
-        : String.format(Locale.ROOT, "%.1f..%.1f", lo, hi);
-
     boolean fetching = fetchInFlight;
-    boolean autoFetch = getSettings().getBoolean(AUTO_FETCH, true);
     boolean hasKey = !getSettings().getString(API_KEY, "").trim().isEmpty();
+    String mode = hasKey ? "LIVE" : "DELAYED (free)";
 
+    // User-facing banner: ticker, data mode, visible level count, last update (ET).
     statusText = String.format(Locale.ROOT,
-        "TLADe GEX  ticker=%s  autoFetch=%s key=%s%s\n"
-      + "dataChars=%d  parsed: %d levels / %d profile\n"
-      + "visible: %d levels / %d profile\n"
-      + "spot=%.2f  bars=%d  levelSpan(%s)=%s",
-        ticker, autoFetch, hasKey, fetching ? " [fetching…]" : "",
-        rawLen, levels.size(), profile.size(),
-        drawLevels.size(), drawProfile.size(),
-        spot, series.size(), ticker, span);
+        "TLADe GEX · %s\n"
+      + "%s%s · %d levels\n"
+      + "updated %s ET",
+        ticker,
+        mode, fetching ? " · fetching…" : "",
+        drawLevels.size(),
+        lastFetchEt);
   }
 
   /** Latest non-NaN close. */
@@ -621,7 +613,7 @@ public class TLADeGexDashboard extends Study
     // v1.3 — populate the 4 Session AVWAP arrays from the same DataSeries.
     // Runs after the level model so a slow PA → AVWAP recompute can't delay
     // the GEX lines from showing up.
-    try { computeAvwapForSeries(series); }
+    try { computeAvwapForSeries(ctx.getDataSeries()); }
     catch (Exception ignore) { /* keep the previous AVWAP arrays on failure */ }
   }
 
@@ -1028,6 +1020,8 @@ public class TLADeGexDashboard extends Study
         if (data != null && data.contains("L:")) {
           fetchedData = data;
           delayedMode = !hasKey;
+          lastFetchEt = java.time.ZonedDateTime.now(java.time.ZoneId.of("America/New_York"))
+              .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
           // Re-run calc so the new string is parsed and the draw model rebuilt — a bare
           // notifyRedraw() would only repaint the (still-empty) figure.
           DataContext c = lastCtx;
@@ -1094,27 +1088,50 @@ public class TLADeGexDashboard extends Study
     {
       String txt = statusText;
       if (txt == null || txt.isEmpty()) return;
-      Font f = new Font("Monospaced", Font.PLAIN, 11);
-      gc.setFont(f);
-      FontMetrics fm = gc.getFontMetrics();
       String[] lines = txt.split("\n");
-      int w = 0;
-      for (String ln : lines) w = Math.max(w, fm.stringWidth(ln));
-      int pad = 6;
-      int lineH = fm.getHeight();
-      int boxW = w + pad * 2;
-      int boxH = lines.length * lineH + pad * 2;
-      int x = b.x + 6;
-      int y = b.y + 6;
-      gc.setColor(new Color(0, 0, 0, 190));
-      gc.fillRect(x, y, boxW, boxH);
-      gc.setColor(new Color(120, 200, 255));
-      gc.drawRect(x, y, boxW, boxH);
-      int ty = y + pad + fm.getAscent();
-      for (String ln : lines) {
-        gc.drawString(ln, x + pad, ty);
-        ty += lineH;
+
+      Object oldAA = gc.getRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING);
+      gc.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+          RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+      Font title = new Font(Font.SANS_SERIF, Font.BOLD, 14);
+      Font body  = new Font(Font.SANS_SERIF, Font.PLAIN, 13);
+      FontMetrics tfm = gc.getFontMetrics(title);
+      FontMetrics bfm = gc.getFontMetrics(body);
+
+      // Width = widest line measured under its own font.
+      int w = tfm.stringWidth(lines[0]);
+      for (int i = 1; i < lines.length; i++) w = Math.max(w, bfm.stringWidth(lines[i]));
+
+      int padX = 10, padY = 8;
+      int titleH = tfm.getHeight();
+      int bodyH  = bfm.getHeight();
+      int boxW = w + padX * 2;
+      int boxH = titleH + (lines.length - 1) * bodyH + padY * 2;
+      int x = b.x + 8;
+      int y = b.y + 8;
+
+      // Opaque rounded panel + amber border so it stays legible over any chart.
+      gc.setColor(new Color(18, 22, 31, 242));
+      gc.fillRoundRect(x, y, boxW, boxH, 8, 8);
+      gc.setColor(new Color(245, 158, 11));
+      gc.drawRoundRect(x, y, boxW, boxH, 8, 8);
+
+      // Title bold amber, then body lines in light grey.
+      gc.setFont(title);
+      gc.setColor(new Color(245, 158, 11));
+      int ty = y + padY + tfm.getAscent();
+      gc.drawString(lines[0], x + padX, ty);
+      ty += (titleH - tfm.getAscent()) + bfm.getAscent();
+      gc.setFont(body);
+      gc.setColor(new Color(226, 232, 240));
+      for (int i = 1; i < lines.length; i++) {
+        gc.drawString(lines[i], x + padX, ty);
+        ty += bodyH;
       }
+
+      if (oldAA != null)
+        gc.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, oldAA);
     }
 
     private void paintLevels(Graphics2D gc, DrawContext ctx, Rectangle b)
