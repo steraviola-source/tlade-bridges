@@ -11,7 +11,7 @@ Usage:
 Requires: Rithmic account (Apex, TopstepTrader, Rithmic Paper Trading, etc.)
 """
 
-import os, math, time, threading, asyncio, socket
+import os, math, time, threading, asyncio, socket, urllib.request, json
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from flask import Flask, jsonify, request
@@ -95,6 +95,26 @@ def _process_tick(sym, price, volume, ts_sec):
             cur['v'] += volume or 0
 
 
+# ── Active contract SSOT — follow TLADe's roll decision instead of guessing ──
+ACTIVE_CONTRACT_URL = os.environ.get('ACTIVE_CONTRACT_URL',
+                                     'https://europe-west1-omggex.cloudfunctions.net/activeContract')
+
+def _fetch_active_contracts():
+    """{ 'ES':'ESU26', 'NQ':'NQU26' } from the TLADe SSOT, or {} on failure."""
+    try:
+        with urllib.request.urlopen(ACTIVE_CONTRACT_URL, timeout=8) as r:
+            return json.load(r)
+    except Exception as e:
+        print(f'[Rithmic] active-contract fetch failed ({e}) — using front-month fallback')
+        return {}
+
+def _code_to_rithmic(code):
+    """'ESU26' -> 'ESU6' (Rithmic single-digit year). None if unparseable."""
+    try:
+        return code[:3] + code[4]   # 'ESU26' → 'ESU' + '6'
+    except Exception:
+        return None
+
 # ── Rithmic Connection (async) ──
 async def rithmic_loop():
     global connected
@@ -138,16 +158,24 @@ async def rithmic_loop():
             ticker = client.plants["ticker"]
             history = client.plants["history"]
 
-            # Get front month contracts
+            # Contract selection: prefer the contract TLADe declares (SSOT), so the
+            # bridge streams the SAME contract as the published levels. Fall back to
+            # Rithmic's front-month if the SSOT is unreachable.
+            ssot = _fetch_active_contracts()  # { 'ES':'ESU26', 'NQ':'NQU26' }
             for sym in ['ES', 'NQ']:
-                contract = await ticker.get_front_month_contract(sym, "CME")
+                contract = _code_to_rithmic(ssot.get(sym, '')) if ssot else None
+                if contract:
+                    print(f'[Rithmic] {sym}: {contract} (SSOT {ssot.get(sym)})')
+                else:
+                    contract = await ticker.get_front_month_contract(sym, "CME")
+                    if contract:
+                        print(f'[Rithmic] {sym}: {contract} (front fallback)')
                 if contract:
                     _contracts[sym] = contract
-                    print(f'[Rithmic] {sym}: {contract}')
                     # Subscribe to tick data
                     await ticker.subscribe_to_market_data(contract, "CME", DataType.LAST_TRADE)
                 else:
-                    print(f'[Rithmic] {sym}: no front month contract found')
+                    print(f'[Rithmic] {sym}: no contract found')
 
             print('[Rithmic] ES + NQ streaming')
 

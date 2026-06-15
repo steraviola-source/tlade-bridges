@@ -11,7 +11,7 @@ Usage:
 Requires: TWS or IB Gateway with API enabled on port 7496 (live) or 7497 (paper)
 """
 
-import os, math, time, threading, asyncio
+import os, math, time, threading, asyncio, urllib.request, json
 from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -47,6 +47,31 @@ _ib_ref = None  # reference to IB instance for on-demand requests
 _daily_cache = {}   # { 'ES': { 'date': '2026-03-30', 'data': [...] } }
 _history_cache = {}  # { 'ES': { 'date': '2026-03-30', 'data': [...] } }
 
+# ── Active contract SSOT — follow TLADe's roll decision instead of guessing ──
+# The bridge no longer picks the front contract on its own (that drifts out of
+# sync with the published levels at every roll). It asks TLADe which contract to
+# stream and qualifies THAT one. Falls back to earliest non-expired if the SSOT
+# is unreachable, so the bridge still works offline / if the endpoint is down.
+ACTIVE_CONTRACT_URL = os.environ.get('ACTIVE_CONTRACT_URL',
+                                     'https://europe-west1-omggex.cloudfunctions.net/activeContract')
+_MONTH_CODE = {'H': '03', 'M': '06', 'U': '09', 'Z': '12'}
+
+def _fetch_active_contracts():
+    """{ 'ES':'ESU26', 'NQ':'NQU26' } from the TLADe SSOT, or {} on failure."""
+    try:
+        with urllib.request.urlopen(ACTIVE_CONTRACT_URL, timeout=8) as r:
+            return json.load(r)
+    except Exception as e:
+        print(f'[IB] active-contract fetch failed ({e}) — using front-by-expiry fallback')
+        return {}
+
+def _code_to_yyyymm(code):
+    """'ESU26' -> '202609'. None if unparseable."""
+    try:
+        return '20' + code[3:5] + _MONTH_CODE[code[2]]
+    except Exception:
+        return None
+
 # ── IB Connection ──
 def ib_loop():
     global connected, _ib_ref
@@ -63,18 +88,31 @@ def ib_loop():
             connected = True
             _ib_ref = ib
 
+            ssot = _fetch_active_contracts()  # { 'ES':'ESU26', 'NQ':'NQU26' }
+
             for sym in ['ES', 'NQ']:
                 fut = Future(symbol=sym, exchange='CME')
                 details = ib.reqContractDetails(fut)
+                # All non-expired contracts, earliest first (fallback ordering).
                 active = sorted(
                     [c.contract for c in details
                      if c.contract.lastTradeDateOrContractMonth
                      and datetime.strptime(c.contract.lastTradeDateOrContractMonth, '%Y%m%d').date() >= datetime.today().date()],
                     key=lambda x: x.lastTradeDateOrContractMonth
                 )
-                if active:
+                # Prefer the contract TLADe declares (SSOT), matched by YYYYMM, so the
+                # bridge streams the SAME contract as the published levels. Fall back to
+                # earliest non-expired if the SSOT is unreachable or absent from the chain.
+                c = None
+                ym = _code_to_yyyymm(ssot.get(sym, '')) if ssot else None
+                if ym:
+                    c = next((x for x in active if (x.lastTradeDateOrContractMonth or '').startswith(ym)), None)
+                    if c:
+                        print(f'[IB] {sym}: {c.localSymbol} (SSOT {ssot.get(sym)})')
+                if c is None and active:
                     c = active[0]
-                    print(f'[IB] {sym}: {c.localSymbol}')
+                    print(f'[IB] {sym}: {c.localSymbol} (front fallback)')
+                if c is not None:
                     with lock:
                         contracts[sym] = c
                         bars[sym] = ib.reqHistoricalData(
