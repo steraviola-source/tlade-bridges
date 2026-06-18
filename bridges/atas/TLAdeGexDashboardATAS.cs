@@ -897,7 +897,8 @@ namespace ATAS.Indicators.Technical
                 // the snap.Count gate so they render even with no cloud levels.
                 if (ShowBreakoutLevels)
                 {
-                    ComputeLocalBos(CurrentBar + 1);
+                    // CurrentBar is the bar COUNT — valid indices are 0..CurrentBar-1.
+                    ComputeLocalBos(CurrentBar);
                     snap.AddRange(_localBos);
                 }
 
@@ -1377,11 +1378,21 @@ namespace ATAS.Indicators.Technical
             if (barCount == _bosLastComputedBars) return;   // recompute only when bars change
             _bosLastComputedBars = barCount;
             _localBos.Clear();
-            var daily = BuildDailyBars(barCount);
-            DetectBosInto(AggregateToWeekly(daily),          "W",  _localBos);
-            DetectBosInto(daily,                              "D",  _localBos);
-            DetectBosInto(AggregateByEtPeriod(barCount, 240), "H4", _localBos);
-            DetectBosInto(AggregateByEtPeriod(barCount, 60),  "H1", _localBos);
+            // H1/H4: from the chart's OWN intraday candles — identical to the
+            // terminal (same ES minutes, same 18:00 ET anchor, same algorithm).
+            var h4 = AggregateByEtPeriod(barCount, 240);
+            var h1 = AggregateByEtPeriod(barCount, 60);
+            DetectBosInto(h4, "H4", _localBos);
+            DetectBosInto(h1, "H1", _localBos);
+
+            // TODO (WS): D/W. The terminal computes daily/weekly BOS from Yahoo
+            // ^GSPC CASH daily (fetchDailyCandles, interval=1d), NOT from the
+            // chart's futures bars — so aggregating the chart here would NOT match
+            // the terminal. To reproduce exactly, fetch ^GSPC (SPX) / ^NDX (NDX)
+            // 1y/1d from Yahoo, apply the S: spread, then DetectBosInto(.., "D"/"W").
+            // Skipped for now so we never show discrepant D/W levels.
+
+            Log($"BOS local: bars={barCount} h4={h4.Count} h1={h1.Count} found={_localBos.Count} ticker={ResolveTicker()}");
         }
 
         // BOS levels come from native chart candles (ES/NQ) — already in chart price,
@@ -1439,6 +1450,11 @@ namespace ATAS.Indicators.Technical
         {
             try
             {
+                // MyDocuments may be OneDrive-redirected (e.g. ...\OneDrive\Dokumente);
+                // AppendAllText does NOT create the dir, so create it or logging is
+                // silently lost.
+                var dir = Path.GetDirectoryName(_logPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
                 File.AppendAllText(_logPath,
                     $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [TLAdeGex] {msg}{Environment.NewLine}");
             }
