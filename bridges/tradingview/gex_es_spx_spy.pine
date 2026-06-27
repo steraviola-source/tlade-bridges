@@ -80,7 +80,8 @@ colorVolBand = input.color(#9ca3af, "Vol Bands", group=groupCol, inline="sys2")
 colorStructure = input.color(#9ca3af, "Structure", group=groupCol)
 lineLeftExt = input.int(50, "Line Left Extension", minval=1, group=groupCol)
 lineStyleInput = input.string("Dotted", "Line Style", options=["Solid", "Dashed", "Dotted"], group=groupCol)
-lineWidth = input.int(1, "Line Width", minval=1, maxval=4, group=groupCol)
+lineWidth = input.int(2, "Line Width", minval=1, maxval=4, group=groupCol)
+labelSide = input.string("Left", "Label Side", options=["Left", "Right"], group=groupCol, tooltip="Where level labels render. Right places them clear of both candles and the GEX profile bars (recommended on busy charts).")
 barColorStyle = input.string("Theme Colors", "Profile Bar Color", options=["Theme Colors", "Greyscale"], group=groupCol)
 
 groupConfluence = "Confluence Zones"
@@ -134,6 +135,16 @@ var float[] bosLevels = array.new_float()
 var bool[] bosBullish = array.new_bool()
 var string[] bosTF = array.new_string()
 
+// Wall flip tracking (5-min close based — see WALL FLIP section below)
+// Walls parsed from data: ES-units strike, type CW/PW, count of consecutive
+// 5m closes beyond the strike in the "currently-out" direction, and the
+// current flipped flag.
+var float[]  wallStrikes  = array.new_float()
+var string[] wallTypes    = array.new_string()
+var int[]    wallCounters = array.new_int()
+var bool[]   wallFlipped  = array.new_bool()
+var string   wallParseKey = ""
+
 // ╔══════════════════════════════════════════════════════════════════════════════╗
 // ║  BREAKOUT STRUCTURE — M/W/D/H4/H1                                            ║
 // ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -151,6 +162,13 @@ bool h1Changed = ta.change(time("60")) != 0
 [dPrevH, dPrevL, dCurrC, dCurrH, dCurrL]       = request.security(syminfo.tickerid, "D",   [high[1], low[1], close, high, low], lookahead=barmerge.lookahead_off)
 [h4PrevH, h4PrevL, h4CurrC, h4CurrH, h4CurrL] = request.security(syminfo.tickerid, "240", [high[1], low[1], close, high, low], lookahead=barmerge.lookahead_off)
 [h1PrevH, h1PrevL, h1CurrC, h1CurrH, h1CurrL] = request.security(syminfo.tickerid, "60",  [high[1], low[1], close, high, low], lookahead=barmerge.lookahead_off)
+
+// ── 5-minute close stream — used by the Wall Flip tracker below ──
+// We pull the 5-min close regardless of the chart's display timeframe, so the
+// flip rule (2 consecutive 5m closes beyond the wall) behaves identically on
+// a 1m, 5m, 1h, or daily chart.
+[close5m, time5m] = request.security(syminfo.tickerid, "5", [close, time], lookahead=barmerge.lookahead_off)
+bool new5mBar = ta.change(time5m) != 0
 
 
 f_checkBOS(float prevH, float prevL, float currC, float currH, float currL, bool changed, bool enabled) =>
@@ -218,6 +236,109 @@ if array.size(bosLines) > 0
             array.remove(bosBullish, i)
             array.remove(bosTF, i)
         i -= 1
+
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  WALL FLIP TRACKING — 5m close based                                         ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+//
+// Rule (per wall, single state per side):
+//   CW non-flipped  →  2 consecutive 5m closes ABOVE strike  →  flipped
+//   CW flipped      →  2 consecutive 5m closes BELOW strike  →  restored
+//   PW non-flipped  →  2 consecutive 5m closes BELOW strike  →  flipped
+//   PW flipped      →  2 consecutive 5m closes ABOVE strike  →  restored
+//
+// A flipped wall keeps its original nature color (CW pink / PW cyan) but is
+// rendered with width-1 + a "↺" suffix on its label. Tooltip carries the
+// "Flipped X→Y" explanation. Same wall, same identity — only its current role
+// switched relative to spot.
+
+// Parse walls from gexDataActive when the data changes. The arrays mirror the
+// order in which CW/PW strikes appear, so the index used by tracking stays
+// stable across bars.
+f_parseWalls(string dataStr) =>
+    array.clear(wallStrikes)
+    array.clear(wallTypes)
+    array.clear(wallCounters)
+    array.clear(wallFlipped)
+    string rest = dataStr
+    if str.startswith(rest, "S:")
+        int sEnd = str.pos(rest, "|")
+        if sEnd > 2
+            rest := str.substring(rest, sEnd + 1)
+    string lvlSection = rest
+    if str.contains(rest, "|P:")
+        int pp = str.pos(rest, "|P:")
+        lvlSection := str.substring(rest, 0, pp)
+    if str.startswith(lvlSection, "L:")
+        lvlSection := str.substring(lvlSection, 2)
+    if lvlSection != ""
+        string[] pairs = str.split(lvlSection, ";")
+        for pair in pairs
+            string[] p = str.split(pair, ",")
+            if array.size(p) >= 2
+                float s = str.tonumber(array.get(p, 0))
+                string t = array.get(p, 1)
+                if not na(s) and (t == "CW" or t == "PW")
+                    array.push(wallStrikes, s)
+                    array.push(wallTypes, t)
+                    array.push(wallCounters, 0)
+                    array.push(wallFlipped, false)
+
+// Lookup helper — returns the current flipped state for a given ES-units strike.
+// Falls back to false (not flipped) when the wall isn't tracked.
+f_getWallFlipped(float strike) =>
+    bool found = false
+    int n = array.size(wallStrikes)
+    int i = 0
+    while i < n and not found
+        if array.get(wallStrikes, i) == strike
+            found := array.get(wallFlipped, i)
+            i := n
+        else
+            i += 1
+    found
+
+// Re-parse walls when the data string changes (= user pastes a live override
+// or weekly seed updates). Cheap to call; only the wallStrikes arrays touched.
+if wallParseKey != gexDataActive
+    wallParseKey := gexDataActive
+    f_parseWalls(gexDataActive)
+
+// On every closed 5m bar, evaluate each wall against close5m and bump the
+// counter when the close is on the "currently-out" side. Two consecutive
+// out-side closes flip (or restore) the wall.
+// Note: strikes are in ES units. close5m is in chart-display units, so for
+// SPX/SPY we lift it back into ES space before the comparison.
+if new5mBar and array.size(wallStrikes) > 0
+    float close5mES = close5m
+    if esSpxSpread > 0 and tickerChoice == "SPX"
+        close5mES := close5m + esSpxSpread
+    else if esSpxSpread > 0 and tickerChoice == "SPY"
+        close5mES := close5m * 10.0 + esSpxSpread
+    int n = array.size(wallStrikes)
+    for i = 0 to n - 1
+        float strike = array.get(wallStrikes, i)
+        string wType = array.get(wallTypes, i)
+        bool   isF   = array.get(wallFlipped, i)
+        int    cnt   = array.get(wallCounters, i)
+        bool beyond = false
+        if wType == "CW"
+            // Not flipped: CW sits above price → "beyond" = close above strike.
+            // Flipped     : CW sits below price → "beyond" = close below strike.
+            beyond := isF ? close5mES < strike : close5mES > strike
+        else if wType == "PW"
+            // Not flipped: PW sits below price → "beyond" = close below strike.
+            // Flipped     : PW sits above price → "beyond" = close above strike.
+            beyond := isF ? close5mES > strike : close5mES < strike
+        if beyond
+            cnt += 1
+            if cnt >= 2
+                isF := not isF
+                cnt := 0
+        else
+            cnt := 0
+        array.set(wallCounters, i, cnt)
+        array.set(wallFlipped, i, isF)
 
 // ╔══════════════════════════════════════════════════════════════════════════════╗
 // ║  SESSION BOXES                                                               ║
@@ -579,27 +700,30 @@ if needsRedraw
                         color lvlColor = color.gray
                         int sc = 0
                         string finalTT = lvlTooltip
+                        bool isWallFlipped = false
 
                         if lvlType == "CW"
-                            bool flipped = cv < close
-                            lvlColor := flipped ? colorPos : colorNeg
-                            sc := flipped ? 1 : 0
+                            // Nature color is preserved regardless of flip state — a CW
+                            // remains a CW (pink/colorNeg) whether acting as resistance
+                            // or as flipped potential support. The flip is communicated
+                            // via reduced width + "↺" label suffix + tooltip phrasing.
+                            isWallFlipped := f_getWallFlipped(lvlStrike)
+                            lvlColor := colorNeg
                             if not isProtected
                                 if isAbove
                                     gexAboveDrawn += 1
                                 else
                                     gexBelowDrawn += 1
-                            finalTT += "\n" + (flipped ? "FLIPPED (Res→Sup)" : "Resistance")
+                            finalTT += "\n" + (isWallFlipped ? "Flipped Res → Sup (2× 5m close beyond)" : "Resistance")
                         else if lvlType == "PW"
-                            bool flipped = cv > close
-                            lvlColor := flipped ? colorNeg : colorPos
-                            sc := flipped ? 1 : 0
+                            isWallFlipped := f_getWallFlipped(lvlStrike)
+                            lvlColor := colorPos
                             if not isProtected
                                 if isAbove
                                     gexAboveDrawn += 1
                                 else
                                     gexBelowDrawn += 1
-                            finalTT += "\n" + (flipped ? "FLIPPED (Sup→Res)" : "Support")
+                            finalTT += "\n" + (isWallFlipped ? "Flipped Sup → Res (2× 5m close beyond)" : "Support")
                         else if lvlType == "ZG"
                             lvlColor := colorZeroGamma
                         else if lvlType == "MP"
@@ -617,9 +741,18 @@ if needsRedraw
 
                         var string ls = line.style_dotted
                         ls := sc == 2 ? line.style_dotted : sc == 1 ? line.style_dashed : f_lineStyle(lineStyleInput)
-                        array.push(gexLines, line.new(bar_index - lineLeftExt, cv, bar_index + profileOffset, cv, color=lvlColor, style=ls, width=lineWidth))
-                        string dLabel = f_formatPrice(lvlStrike) + " " + lvlType + " " + lvlLabel
-                        array.push(gexLabels, label.new(bar_index - lineLeftExt, cv, dLabel, color=lvlColor, style=label.style_label_left, textcolor=color.white, size=size.small, tooltip=finalTT))
+                        // Width: flipped CW/PW lose 1pt (min 1) so the line reads as
+                        // "weakened in its current role". The user's chosen lineWidth
+                        // remains the baseline for non-flipped walls.
+                        int useWidth = isWallFlipped ? math.max(lineWidth - 1, 1) : lineWidth
+                        array.push(gexLines, line.new(bar_index - lineLeftExt, cv, bar_index + profileOffset, cv, color=lvlColor, style=ls, width=useWidth, extend=extend.both))
+                        string flipSuffix = isWallFlipped ? " ↺" : ""
+                        string dLabel = f_formatPrice(lvlStrike) + " " + lvlType + " " + lvlLabel + flipSuffix
+                        // Label anchor: "Left" keeps the historical placement (= clear of
+                        // candles thanks to lineLeftExt). "Right" places the label past the
+                        // GEX profile bars so it overlaps neither candles nor profile.
+                        int lblX = labelSide == "Right" ? bar_index + profileOffset + profileWidth + 5 : bar_index - lineLeftExt
+                        array.push(gexLabels, label.new(lblX, cv, dLabel, color=lvlColor, style=label.style_label_left, textcolor=color.white, size=size.small, tooltip=finalTT))
 
     // ── Draw Profile Bars ──
     if showProfile and profileData != ""
