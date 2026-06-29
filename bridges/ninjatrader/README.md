@@ -4,21 +4,26 @@ Connect NinjaTrader 8 to TLADe for real-time ES/NQ data. Feed-agnostic — works
 
 ## What You Get
 
-- **Real-time candles** — tick data pushed from NT8 indicator via HTTP
-- **Any feed** — Rithmic, CQG, Kinetick, Simulated — if NT8 can see it, TLADe gets it
+- **Real-time spot ticks** — every NT8 tick forwarded sub-second
+- **Live candles** — the in-progress 5-min bar pushed ~1×/sec so the
+  terminal chart paints live, not only at 5-minute closes
+- **500-bar backfill** on indicator mount, so chart history is there
+  immediately instead of accumulating tick-by-tick
+- **Any feed** — Rithmic, CQG, Kinetick, Simulated, IB through NT8 —
+  if NinjaTrader can see it, TLADe gets it
 - **Zero config** — NT8 indicator auto-pushes, Python receiver auto-serves
 
 ## Architecture
 
 ```
-Your Feed (Rithmic/CQG/Kinetick)
+Your Feed (Rithmic/CQG/Kinetick/IB)
   └── NinjaTrader 8
-        └── TLAdeBridge.cs (NT8 indicator, pushes ticks via HTTP POST)
+        └── TLAdeBridge.cs (NT8 indicator, pushes ticks + bars via HTTP POST)
               └── tlade_bridge_nt8.py (Python receiver on port 5000)
                     └── TLADe Terminal (auto-detects on localhost:5000)
 ```
 
-The receiver speaks the standard [Bridge Protocol](../../protocol/BRIDGE_SPEC.md) on port 5000, exposing `/health` and `/ib_data` to the terminal and `/push_spot` for the NT8 indicator.
+The receiver speaks the standard [Bridge Protocol](../../protocol/BRIDGE_SPEC.md) on port 5000, exposing `/health` and `/ib_data` to the terminal and `/push_spot` + `/push_bar` for the NT8 indicator.
 
 ## Requirements
 
@@ -51,6 +56,12 @@ python tlade_bridge_nt8.py
 ### 4. Open TLADe
 
 The terminal auto-detects the bridge on localhost.
+
+## Updating
+
+When a new version ships, follow [`UPDATING.md`](./UPDATING.md) — replacing
+the `.cs` file alone is not enough, you also need to flush the NinjaScript
+Editor buffer, recompile, and re-attach the indicator on the chart.
 
 ## FAQ
 
