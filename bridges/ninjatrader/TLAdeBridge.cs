@@ -19,6 +19,12 @@ namespace NinjaTrader.NinjaScript.Indicators
         private DateTime lastLiveBarPostTime = DateTime.MinValue;
         private int lastPostedBarIndex = -1;
         private bool backfillDone      = false;
+        // backfillDone flips immediately at the start of the backfill block;
+        // backfillFinished flips only after PostBackfillPayloads has drained
+        // every queued payload. Used to suppress the live bar push while the
+        // backfill burst is still in flight (avoids saturating the local
+        // socket pool against the Flask receiver).
+        private volatile bool backfillFinished = false;
 
         // How many closed bars to push on startup to seed the bridge with
         // history. The terminal expects "at least 2 weeks of 5-minute bars"
@@ -106,12 +112,13 @@ namespace NinjaTrader.NinjaScript.Indicators
             // Replicates IB's `keepUpToDate=True` on reqHistoricalData: keeps the
             // last bar fresh on the receiver so /ib_data returns a live close,
             // not a stale 5-min-old one. Throttled ~1s so we don't flood the
-            // local socket on every tick. The Python receiver dedupes by
-            // bar_index, so the same slot keeps getting overwritten until this
-            // bar closes (when block 2 above posts its final state under the
-            // previous bar_index).
+            // local socket on every tick. Suppressed while the backfill burst
+            // is still draining so we don't double up on the Flask receiver.
+            // The Python receiver dedupes by bar_index, so the same slot keeps
+            // getting overwritten until this bar closes (when block 2 above
+            // posts its final state under the previous bar_index).
             DateTime nowLive = DateTime.Now;
-            if (CurrentBar >= 0 && (nowLive - lastLiveBarPostTime).TotalSeconds >= 1)
+            if (backfillFinished && CurrentBar >= 0 && (nowLive - lastLiveBarPostTime).TotalSeconds >= 1)
             {
                 lastLiveBarPostTime = nowLive;
                 long liveUnixTime = ((DateTimeOffset)Time[0]).ToUnixTimeSeconds();
@@ -195,10 +202,12 @@ namespace NinjaTrader.NinjaScript.Indicators
                 {
                     Print($"[TLAdeBridge] BACKFILL POST error: {ex.Message}");
                 }
-                // Tiny delay so the bursty startup doesn't saturate the local
-                // socket and the Python receiver has time to process between bars.
-                await Task.Delay(10);
+                // Delay between bars so we don't saturate the local socket
+                // pool — 25ms keeps the burst inside what a single-threaded
+                // Flask receiver can drain even with concurrent live-bar push.
+                await Task.Delay(25);
             }
+            backfillFinished = true;
             Print($"[TLAdeBridge] Backfill complete: {sent}/{payloads.Count} bars for {ticker}");
         }
     }

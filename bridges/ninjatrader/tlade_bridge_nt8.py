@@ -201,4 +201,8 @@ if __name__ == "__main__":
     print(f"[TLADe NT8 Bridge] v{VERSION} listening on http://localhost:{PORT}")
     print("[TLADe NT8 Bridge] waiting for ticks + bars from TLAdeBridge.cs (NT8 indicator)...")
     print(f"[TLADe NT8 Bridge] bar storage cap: {MAX_BARS} per ticker")
-    app.run(host="127.0.0.1", port=PORT, debug=False)
+    # threaded=True so the receiver can accept concurrent POSTs from the NT8
+    # indicator (backfill burst + live bar push + spot ticks can hit the
+    # same socket simultaneously; without threading the late requests fail
+    # with "An error occurred while sending the request" on the C# side).
+    app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True)
