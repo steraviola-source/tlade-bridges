@@ -16,6 +16,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private static readonly HttpClient httpClient = new HttpClient();
         private double lastPostedPrice = 0;
         private DateTime lastPostTime  = DateTime.MinValue;
+        private DateTime lastLiveBarPostTime = DateTime.MinValue;
         private int lastPostedBarIndex = -1;
         private bool backfillDone      = false;
 
@@ -101,7 +102,34 @@ namespace NinjaTrader.NinjaScript.Indicators
                 }
             }
 
-            // ── 3. Spot tick (unchanged) ────────────────────────────────────
+            // ── 3. Live bar push — bar[0] is the in-progress current 5m bar.
+            // Replicates IB's `keepUpToDate=True` on reqHistoricalData: keeps the
+            // last bar fresh on the receiver so /ib_data returns a live close,
+            // not a stale 5-min-old one. Throttled ~1s so we don't flood the
+            // local socket on every tick. The Python receiver dedupes by
+            // bar_index, so the same slot keeps getting overwritten until this
+            // bar closes (when block 2 above posts its final state under the
+            // previous bar_index).
+            DateTime nowLive = DateTime.Now;
+            if (CurrentBar >= 0 && (nowLive - lastLiveBarPostTime).TotalSeconds >= 1)
+            {
+                lastLiveBarPostTime = nowLive;
+                long liveUnixTime = ((DateTimeOffset)Time[0]).ToUnixTimeSeconds();
+                string livePayload =
+                    "{" +
+                    $"\"ticker\":\"{ticker}\"," +
+                    $"\"time\":{liveUnixTime}," +
+                    $"\"open\":{Open[0].ToString(CultureInfo.InvariantCulture)}," +
+                    $"\"high\":{High[0].ToString(CultureInfo.InvariantCulture)}," +
+                    $"\"low\":{Low[0].ToString(CultureInfo.InvariantCulture)}," +
+                    $"\"close\":{Close[0].ToString(CultureInfo.InvariantCulture)}," +
+                    $"\"volume\":{(long)Volume[0]}," +
+                    $"\"bar_index\":{CurrentBar}" +
+                    "}";
+                Task.Run(() => PostBarPayload(ticker, livePayload, CurrentBar));
+            }
+
+            // ── 4. Spot tick (unchanged) ────────────────────────────────────
             double price = Close[0];
             DateTime now = DateTime.Now;
 
