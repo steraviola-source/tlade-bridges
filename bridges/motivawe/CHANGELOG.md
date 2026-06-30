@@ -1,5 +1,25 @@
 # CHANGELOG — MotiveWave Indicator
 
+## 2026-06-30 — macOS compatibility — bytecode downgraded to Java 25 (v1.3.2)
+
+`dist/TLADeGexDashboard.jar` recompiled with `--release 25` so it loads
+on **MotiveWave 7.0.22 onwards on macOS**, which ships a Java 25 runtime
+(downgraded from Java 26 in 7.0.22 because of macOS crashes — see
+MotiveWave 7.0.27 release notes, 2026-06-29). The prior v1.3.1 jar was
+class file version 70 (Java 26), so the macOS JVM rejected it with
+`UnsupportedClassVersionError` and users reported "the indicator
+doesn't load at all".
+
+No source changes. The TLADeGexDashboard source already targets only
+Java 25-compatible APIs; the v1.3.1 jar was Java 26 simply because that
+was the JDK on the build machine. Cross-compile via
+`javac --release 25 -classpath mwave_sdk.jar -d build TLADeGexDashboard.java`
+produces classfile major 69, which loads on both MW macOS (Java 25)
+and MW Windows / Linux (Java 26, forward-compatible).
+
+Single jar still covers all three OSes — no need to ship Mac/Win
+separately.
+
 ## 2026-06-14 — Status banner redesign + v1.3 build fix (v1.3.1)
 
 Two changes on `TLADeGexDashboard.java`.
