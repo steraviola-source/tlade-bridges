@@ -206,6 +206,14 @@ public class TLADeGexDashboard extends Study
   // Last successful fetch time as ET HH:mm, shown in the status banner.
   private volatile String lastFetchEt = "—";
 
+  /** Guard: fires only once per Study instance. calculateValues is our
+   *  reliable "first render" hook — MotiveWave rebuilds studies from
+   *  saved settings on workspace open WITHOUT calling onLoad again, so
+   *  a workspace with the TLADe study saved would come up empty until
+   *  the next scheduled slot fired. Kicking startFetch(true) here gives
+   *  the same behaviour a fresh drop-on-chart already has. */
+  private volatile boolean initialFetchKicked = false;
+
   // Theme / bar brushes resolved from settings (recomputed on each rebuild).
   private Color posColor = new Color(0x22, 0xc5, 0x5e);
   private Color negColor = new Color(0xef, 0x44, 0x44);
@@ -352,6 +360,7 @@ public class TLADeGexDashboard extends Study
     lastFetchMinuteET = -1;
     lastFetchTimeMs = 0L;
     fetchInFlight = false;
+    initialFetchKicked = false;
   }
 
   /** Force a full rebuild whenever the user edits any setting. */
@@ -397,14 +406,12 @@ public class TLADeGexDashboard extends Study
     s.schedule(() -> {
       try {
         if (getSettings().getBoolean(AUTO_FETCH, true)) {
-          // Resolve which slot just fired (= absolute time, so we know).
-          java.time.ZonedDateTime et;
-          try { et = java.time.ZonedDateTime.now(java.time.ZoneId.of("America/New_York")); }
-          catch (Exception e) { et = null; }
-          if (et != null) {
-            int etMins = et.getHour() * 60 + et.getMinute();
-            lastFetchMinuteET = etMins;
-          }
+          // Resolve which slot just fired. On some macOS Java 25 runtimes
+          // ZoneId.of("America/New_York") throws (tzdata missing/sandboxed),
+          // the previous swallow left lastFetchMinuteET unwritten and the
+          // banner rendered "updated — ET" indefinitely (Prince, 2026-07-01).
+          int etMins = nowETMinutesWithFallback();
+          if (etMins >= 0) lastFetchMinuteET = etMins;
           lastFetchTimeMs = System.currentTimeMillis();
           startFetch(false);
         }
@@ -412,6 +419,38 @@ public class TLADeGexDashboard extends Study
         scheduleNextFetch(); // chain to next absolute slot
       }
     }, delayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+  }
+
+  /** Return current ET minute-of-day, falling back to a manual UTC offset
+   *  when the JVM's tz database can't resolve America/New_York (observed on
+   *  macOS Java 25). Prints the underlying exception the first time it
+   *  happens so we can chase the root cause. Returns -1 only if even
+   *  Instant.now() throws, which is effectively never. */
+  private static boolean _tzWarningPrinted = false;
+  private static int nowETMinutesWithFallback()
+  {
+    try {
+      java.time.ZonedDateTime et = java.time.ZonedDateTime.now(java.time.ZoneId.of("America/New_York"));
+      return et.getHour() * 60 + et.getMinute();
+    } catch (Throwable t) {
+      if (!_tzWarningPrinted) {
+        _tzWarningPrinted = true;
+        System.err.println("[TLADe] ET zone resolution failed, falling back to UTC offset. Cause: " + t);
+      }
+    }
+    // Fallback: DST rule of thumb — EDT (UTC-4) from second Sunday of March
+    // to first Sunday of November; EST (UTC-5) otherwise. Month-boundary
+    // approximation is fine for a banner timestamp (worst case: one hour
+    // off around the two transition Sundays).
+    try {
+      java.time.OffsetDateTime nowUtc = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC);
+      int m = nowUtc.getMonthValue();
+      int offsetHours = (m >= 3 && m <= 10) ? -4 : -5;
+      int etHour = (nowUtc.getHour() + offsetHours + 24) % 24;
+      return etHour * 60 + nowUtc.getMinute();
+    } catch (Throwable t) {
+      return -1;
+    }
   }
 
   private static long msUntilNextSlot()
@@ -446,6 +485,14 @@ public class TLADeGexDashboard extends Study
     if (series == null || instr == null || series.size() == 0) return;
 
     lastCtx = ctx;
+
+    // Kick the initial fetch here (workspace-open path — onLoad is not
+    // fired when MW rebuilds a saved study). See initialFetchKicked doc.
+    if (!initialFetchKicked && getSettings().getBoolean(AUTO_FETCH, true)) {
+      initialFetchKicked = true;
+      startFetch(true);
+      startScheduler();
+    }
 
     // Consume any data delivered by the background fetch thread. Kept in a field
     // (not written back into settings) to avoid mutating settings from inside
@@ -1029,8 +1076,19 @@ public class TLADeGexDashboard extends Study
         if (data != null && data.contains("L:")) {
           fetchedData = data;
           delayedMode = !hasKey;
-          lastFetchEt = java.time.ZonedDateTime.now(java.time.ZoneId.of("America/New_York"))
-              .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
+          // Timestamp write is guarded — on macOS Java 25 the TZ resolution
+          // throws here and used to skip the recalculate below, leaving the
+          // chart with zero levels until the user removed + re-added the
+          // study. Same fallback path as the scheduler helper.
+          try {
+            lastFetchEt = java.time.ZonedDateTime.now(java.time.ZoneId.of("America/New_York"))
+                .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
+          } catch (Throwable tzt) {
+            int etMins = nowETMinutesWithFallback();
+            if (etMins >= 0) {
+              lastFetchEt = String.format("%02d:%02d", etMins / 60, etMins % 60);
+            }
+          }
           // Re-run calc so the new string is parsed and the draw model rebuilt — a bare
           // notifyRedraw() would only repaint the (still-empty) figure.
           DataContext c = lastCtx;
