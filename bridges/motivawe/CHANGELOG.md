@@ -1,5 +1,52 @@
 # CHANGELOG — MotiveWave Indicator
 
+## 2026-07-02 — Fetch error surfacing + delayed workspace-open kick (v1.3.4)
+
+Two changes on `TLADeGexDashboard.java`, both diagnostic and both
+triggered by a case where `v1.3.3` on macOS Java 25 rendered the
+banner as `LIVE · fetching… · 0 levels / updated — ET` indefinitely,
+with no way to tell if the problem was a wrong API key, a network
+issue, or a stuck fetch thread.
+
+### 1. Delayed initial fetch on workspace-open
+
+`v1.3.3` kicked `startFetch(true)` synchronously from the first
+`calculateValues` invocation, so the HTTPS handshake happened inline
+with MW's first render pass. On macOS Java 25 that path appeared
+to leave the fetch thread hung in the transport layer with
+`fetchInFlight = true` and no completion ever reaching the
+`finally`. `onLoad` (the drop-fresh path) never showed the problem.
+
+v1.3.4 keeps the `initialFetchKicked` guard but schedules the fetch
+`1.5 s` after the first paint via the study's own
+`ScheduledExecutorService`, so the fetch thread starts after MW has
+completed its first render pass. `onLoad` stays synchronous.
+
+### 2. Fetch error surfaced in the status banner
+
+Two silent-fail paths in `startFetch` used to leave the banner
+frozen on `updated — ET` with `0 levels`:
+
+- HTTP response received but body did not contain the `L:` payload
+  marker (e.g. 401 invalid key, 403 forbidden, 429 rate-limited,
+  maintenance JSON) — the success branch was gated on
+  `data.contains("L:")` with no `else`.
+- `catch (Exception ignore)` swallowed SSL / DNS / socket errors.
+
+Both now write to a new `lastFetchError` field, and `buildStatus`
+renders that string in place of the "updated … ET" line until the
+next successful fetch clears it. Examples the user will see:
+
+- `ERR: HTTP 401 · {"error":"invalid api key"}`
+- `ERR: HTTP 429 · Rate limit exceeded`
+- `ERR: net: SSLHandshakeException · PKIX path building failed…`
+- `updated 10:32 ET`  ← after success
+
+`System.err.println` also fires on both paths, so users who open the
+MotiveWave console see the same info in logs.
+
+Single jar still covers macOS + Windows + Linux (classfile major 69).
+
 ## 2026-06-30 — macOS compatibility — bytecode downgraded to Java 25 (v1.3.2)
 
 `dist/TLADeGexDashboard.jar` recompiled with `--release 25` so it loads

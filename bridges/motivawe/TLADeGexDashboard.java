@@ -206,6 +206,11 @@ public class TLADeGexDashboard extends Study
   // Last successful fetch time as ET HH:mm, shown in the status banner.
   private volatile String lastFetchEt = "—";
 
+  // Last fetch error (HTTP code or exception class) — surfaced in the status
+  // banner instead of "updated — ET" when a fetch does not yield a payload.
+  // Cleared on the next successful fetch.
+  private volatile String lastFetchError = null;
+
   /** Guard: fires only once per Study instance. calculateValues is our
    *  reliable "first render" hook — MotiveWave rebuilds studies from
    *  saved settings on workspace open WITHOUT calling onLoad again, so
@@ -361,6 +366,7 @@ public class TLADeGexDashboard extends Study
     lastFetchTimeMs = 0L;
     fetchInFlight = false;
     initialFetchKicked = false;
+    lastFetchError = null;
   }
 
   /** Force a full rebuild whenever the user edits any setting. */
@@ -488,10 +494,23 @@ public class TLADeGexDashboard extends Study
 
     // Kick the initial fetch here (workspace-open path — onLoad is not
     // fired when MW rebuilds a saved study). See initialFetchKicked doc.
+    //
+    // v1.3.4 — the fetch is *delayed 1.5s* via the scheduler executor so it
+    // does not run inline with the first render pass. On macOS Java 25 the
+    // synchronous kick from calculateValues (v1.3.3) appeared to hang the
+    // fetch thread in the HTTPS layer with fetchInFlight stuck at true.
+    // onLoad (drop-fresh path) stays synchronous — that path never showed
+    // the problem.
     if (!initialFetchKicked && getSettings().getBoolean(AUTO_FETCH, true)) {
       initialFetchKicked = true;
-      startFetch(true);
       startScheduler();
+      java.util.concurrent.ScheduledExecutorService s = scheduler;
+      if (s != null) {
+        s.schedule(() -> startFetch(true), 1500, java.util.concurrent.TimeUnit.MILLISECONDS);
+      } else {
+        // Should not happen (startScheduler just set it), but keep the fallback.
+        startFetch(true);
+      }
     }
 
     // Consume any data delivered by the background fetch thread. Kept in a field
@@ -533,14 +552,20 @@ public class TLADeGexDashboard extends Study
     String mode = hasKey ? "LIVE" : "DELAYED (free)";
 
     // User-facing banner: ticker, data mode, visible level count, last update (ET).
+    // v1.3.4 — bottom line switches to the last fetch error when the fetch is
+    // not producing a payload (HTTP code, TLS/network exception). Cleared on
+    // the next successful fetch.
+    String bottom = lastFetchError != null
+        ? "ERR: " + lastFetchError
+        : "updated " + lastFetchEt + " ET";
     statusText = String.format(Locale.ROOT,
         "TLADe GEX · %s\n"
       + "%s%s · %d levels\n"
-      + "updated %s ET",
+      + "%s",
         ticker,
         mode, fetching ? " · fetching…" : "",
         drawLevels.size(),
-        lastFetchEt);
+        bottom);
   }
 
   /** Latest non-NaN close. */
@@ -1076,6 +1101,7 @@ public class TLADeGexDashboard extends Study
         if (data != null && data.contains("L:")) {
           fetchedData = data;
           delayedMode = !hasKey;
+          lastFetchError = null; // clear any previous error state on success
           // Timestamp write is guarded — on macOS Java 25 the TZ resolution
           // throws here and used to skip the recalculate below, leaving the
           // chart with zero levels until the user removed + re-added the
@@ -1094,9 +1120,29 @@ public class TLADeGexDashboard extends Study
           DataContext c = lastCtx;
           if (c != null) recalculate(c);
           else notifyRedraw();
+        } else {
+          // v1.3.4 — response received but body does not contain a level payload
+          // (e.g. HTTP 401 invalid key, 403 forbidden, 429 rate limited, or a
+          // maintenance page). Surface the error in the banner instead of the
+          // previous silent-fail that showed "updated — ET" indefinitely.
+          String snippet = (data != null && !data.isEmpty())
+              ? " · " + data.substring(0, Math.min(40, data.length())).replaceAll("\\s+", " ")
+              : "";
+          lastFetchError = "HTTP " + code + snippet;
+          System.err.println("[TLADe] fetch no L: " + lastFetchError);
+          DataContext c = lastCtx;
+          if (c != null) recalculate(c);
+          else notifyRedraw();
         }
-      } catch (Exception ignore) {
-        // Silent fail — fall back to whatever is in GEX_DATA.
+      } catch (Exception e) {
+        // v1.3.4 — was silent-fail; surface network/TLS errors in the banner
+        // so the user can distinguish "key wrong" from "network unreachable".
+        lastFetchError = "net: " + e.getClass().getSimpleName()
+            + (e.getMessage() != null ? " · " + e.getMessage() : "");
+        System.err.println("[TLADe] fetch failed: " + e);
+        DataContext c = lastCtx;
+        if (c != null) recalculate(c);
+        else notifyRedraw();
       } finally {
         fetchInFlight = false;
       }
