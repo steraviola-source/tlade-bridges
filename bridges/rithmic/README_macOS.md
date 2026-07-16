@@ -134,6 +134,22 @@ xattr -d com.apple.quarantine start.command
 
 After this, double-click works normally.
 
+### The bridge runs, but TLADe never switches to live data (Chrome)
+
+If the bridge is streaming in its own window and `http://localhost:5000/health` responds, but the terminal never picks up the live feed, the blocker is your browser — not the bridge.
+
+Chrome is progressively rolling out a security policy called **Local Network Access**, which blocks websites loaded over HTTPS from reaching services on your own machine (`localhost`). When it applies, the terminal's requests to the bridge are silently blocked.
+
+**Fix (Chrome):**
+
+1. Open `chrome://flags/#local-network-access-check`
+2. Set **Local Network Access Checks** to **Disabled**
+3. Restart Chrome completely
+
+Two caveats: the flag is version-dependent — it may be renamed or removed after a Chrome update, so if the bridge stops connecting right after updating Chrome, suspect this first. And the flag disables the check browser-wide, not just for TLADe.
+
+**Alternative:** Firefox does not enforce this policy the same way and connects to the bridge out of the box.
+
 ## Manual Setup (advanced)
 
 ```bash

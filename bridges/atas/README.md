@@ -302,6 +302,9 @@ The cloud returns integer strikes (e.g. 7383). TLADe Terminal applies a per-stri
 **ATAS hangs after a DLL replace.**
 You almost certainly copied the DLL while ATAS was running. Kill ATAS via Task Manager, then re-copy with ATAS fully closed.
 
+**Bridge running and `/health` responds, but TLADe never switches to live data (Chrome).**
+Chrome's **Local Network Access** policy (rolling out progressively) blocks HTTPS websites from reaching `localhost`, so the terminal's requests to the bridge are silently blocked. Fix: open `chrome://flags/#local-network-access-check`, set **Local Network Access Checks** to **Disabled**, restart Chrome completely. The flag is version-dependent (it may be renamed or removed after a Chrome update — suspect this first if the bridge stops connecting right after updating) and disables the check browser-wide. Alternative: Firefox does not enforce this policy the same way and connects out of the box.
+
 ---
 
 ## File Reference

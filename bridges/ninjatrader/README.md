@@ -78,9 +78,26 @@ one for NQ). The timeframe of that NT8 chart (1m, 5m, tick…) doesn't affect
 what TLADe receives — multi-timeframe analysis happens inside the TLADe
 terminal itself via the built-in 5m / 15m / 30m / H1 / H4 switcher.
 
+### The bridge runs, but TLADe never switches to live data (Chrome)
+
+If the receiver is running and `http://localhost:5000/health` responds, but the
+terminal never picks up the live feed, the blocker is your browser — not the
+bridge. Chrome is progressively rolling out a security policy called **Local
+Network Access**, which blocks HTTPS websites from reaching services on your
+own machine (`localhost`).
+
+**Fix (Chrome):** open `chrome://flags/#local-network-access-check`, set
+**Local Network Access Checks** to **Disabled**, then restart Chrome
+completely. The flag is version-dependent (it may be renamed or removed after
+a Chrome update — suspect this first if the bridge stops connecting right
+after updating) and disables the check browser-wide.
+
+**Alternative:** Firefox does not enforce this policy the same way and
+connects to the bridge out of the box.
+
 ## Status
 
-**Beta** — validated with NT8 Simulated Feed. Spot-only path: NT8 sends individual ticks (no bar history), so the terminal uses its own candle source for the chart while spot updates flow live from NT8. Tested with live data feeds pending (needs funded AMP account with Rithmic or CQG).
+**Beta** — validated with NT8 Simulated Feed. Full data path: NT8 pushes real-time spot ticks, closed 5-min bars, the in-progress live bar (~1×/sec), and a 500-bar backfill on indicator mount — so the terminal chart runs entirely on your NT8 feed. Tested with live data feeds pending (needs funded AMP account with Rithmic or CQG).
 
 ## Contributing
 
