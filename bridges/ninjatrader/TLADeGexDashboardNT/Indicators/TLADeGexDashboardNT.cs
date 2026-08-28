@@ -86,6 +86,8 @@ namespace NinjaTrader.NinjaScript.Indicators
         // candles (Yahoo ^GSPC/^NDX), aggregating futures chart bars would show
         // discrepant levels (same rationale as the ATAS port).
         private readonly List<LevelEntry> _localBos = new List<LevelEntry>();
+        private readonly List<LevelEntry> _localPA = new List<LevelEntry>();
+        private int _paLastComputedBar = -1;
         private int _bosLastComputedBar = -1;
         private struct DBar { public double H, L, C; }
 
@@ -186,6 +188,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ShowGexLevels = true;
                 ShowSystemLevels = true;
                 ShowStructureLevels = true;
+                ShowZeroGamma = false;   // ZG already shows via System Levels; this shows it ALONE when System is off
 
                 MaxGexLevels = 10;     // 999 = All
                 ShowOnlyNear = false;
@@ -210,6 +213,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                 // Line extents are measured FROM THE LABEL anchor (after padding)
                 LineLeftBars = 80;
                 LineRightBars = 0;
+                LevelLineWidth = 1;     // width for GEX/system lines (ZG/MP stay >= 2)
 
                 // Profile (P:)
                 ShowProfileBars = true;
@@ -402,6 +406,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 ProfileOffsetBars.ToString(inv),
                 ShowLabels.ToString(),
                 LabelFontSize.ToString(inv),
+                ShowZeroGamma.ToString(),
+                LevelLineWidth.ToString(inv),
                 LineLeftBars.ToString(inv),
                 LineRightBars.ToString(inv),
                 ShowProfileBars.ToString(),
@@ -639,6 +645,59 @@ namespace NinjaTrader.NinjaScript.Indicators
             _localBos.Clear();
             DetectBosInto(AggregateByEtPeriod(240), "H4");
             DetectBosInto(AggregateByEtPeriod(60), "H1");
+        }
+
+        private LevelEntry MakePA(double price, string type)
+        {
+            return new LevelEntry { EsStrike = price, Type = type, Label = type, Tooltip = "", Magnitude = 0, IsChartSpace = true };
+        }
+
+        // Local Structure: PDH/PDL = prior futures-day (18:00 ET) high/low; PWH/PWL = prior week high/low.
+        // Computed from the chart's own bars (chart-native price, no spread conversion) — mirrors the
+        // local BOS. Mother is GEX-only; price-dependent levels live in each front-end.
+        private void ComputeLocalPA()
+        {
+            if (CurrentBar == _paLastComputedBar) return;
+            _paLastComputedBar = CurrentBar;
+            _localPA.Clear();
+            int count = Bars.Count;
+            if (count < 2) return;
+
+            var dayH = new SortedDictionary<DateTime, double>();
+            var dayL = new SortedDictionary<DateTime, double>();
+            for (int i = 0; i < count; i++)
+            {
+                DateTime et = BarOpenEt(Bars.GetTime(i));
+                DateTime fd = (et.Hour >= 18 ? et.Date.AddDays(1) : et.Date);   // futures day (18:00 ET boundary)
+                double h = Bars.GetHigh(i), l = Bars.GetLow(i);
+                if (!dayH.ContainsKey(fd)) { dayH[fd] = h; dayL[fd] = l; }
+                else { if (h > dayH[fd]) dayH[fd] = h; if (l < dayL[fd]) dayL[fd] = l; }
+            }
+            var days = new List<DateTime>(dayH.Keys);
+            if (days.Count >= 2)
+            {
+                var pd = days[days.Count - 2];   // prior completed day (last = current, in-progress)
+                _localPA.Add(MakePA(dayH[pd], "PDH"));
+                _localPA.Add(MakePA(dayL[pd], "PDL"));
+            }
+
+            var weekH = new SortedDictionary<DateTime, double>();
+            var weekL = new SortedDictionary<DateTime, double>();
+            foreach (var d in days)
+            {
+                int dow = (int)d.DayOfWeek;                 // Sunday = 0
+                int back = (dow == 0 ? 6 : dow - 1);        // days since Monday
+                DateTime wk = d.AddDays(-back).Date;        // Monday of that week
+                if (!weekH.ContainsKey(wk)) { weekH[wk] = dayH[d]; weekL[wk] = dayL[d]; }
+                else { if (dayH[d] > weekH[wk]) weekH[wk] = dayH[d]; if (dayL[d] < weekL[wk]) weekL[wk] = dayL[d]; }
+            }
+            var weeks = new List<DateTime>(weekH.Keys);
+            if (weeks.Count >= 2)
+            {
+                var pw = weeks[weeks.Count - 2];
+                _localPA.Add(MakePA(weekH[pw], "PWH"));
+                _localPA.Add(MakePA(weekL[pw], "PWL"));
+            }
         }
 
         // ──────────────────────────────────────────────────────────────────────
@@ -916,6 +975,14 @@ namespace NinjaTrader.NinjaScript.Indicators
                 DrawBosLevels(spot, labelPosBarsAgo, leftBarsAgo, rightBarsAgo);
             }
 
+            // v3.3 — local Structure (PDH/PDL/PWH/PWL) from chart bars (Mother is GEX-only;
+            // price-dependent levels are computed front-end-side, no longer shipped in the feed)
+            if (ShowStructureLevels)
+            {
+                ComputeLocalPA();
+                DrawPALevels(spot, labelPosBarsAgo, leftBarsAgo, rightBarsAgo);
+            }
+
             if (ShowProfileBars && _profile.Count > 0)
                 DrawProfileBars(profileBarsAgo);
         }
@@ -945,6 +1012,32 @@ namespace NinjaTrader.NinjaScript.Indicators
                     var t = Draw.Text(this, textTag, display, labelBarsAgo, y, lvlBrush);
                     if (t != null && _labelFont != null)
                         t.Font = _labelFont;
+                    _tags.Add(textTag);
+                }
+            }
+        }
+
+        private void DrawPALevels(double spot, int labelBarsAgo, int leftBarsAgo, int rightBarsAgo)
+        {
+            Brush paBrush = MakeBrush(Color.FromRgb(0x94, 0xA3, 0xB8), 255); // slate — Structure (PDH/PDL/PWH/PWL)
+            foreach (var lvl in _localPA)
+            {
+                double y = lvl.EsStrike; // chart-native price
+                bool inRange = !ShowOnlyNear || (Math.Abs(spot - y) / Math.Max(1e-9, spot) * 100.0 <= NearPct);
+                if (!inRange) continue;
+
+                int paW = Math.Max(1, Math.Min(10, LevelLineWidth));
+                string key = $"{lvl.Type}_{y.ToString("0.####", inv)}";
+                string lineTag = $"TLADeLine_{key}";
+                Draw.Line(this, lineTag, false, leftBarsAgo, y, rightBarsAgo, y, paBrush, DashStyleHelper.Dot, paW);
+                _tags.Add(lineTag);
+
+                if (ShowLabels)
+                {
+                    string textTag = $"TLADeText_{key}";
+                    string display = $"{(EffectiveDisplayTicker() == "SPY" || EffectiveDisplayTicker() == "QQQ" ? y.ToString("0.##", inv) : Math.Round(y).ToString("0", inv))} {lvl.Label}";
+                    var t = Draw.Text(this, textTag, display, labelBarsAgo, y, paBrush);
+                    if (t != null && _labelFont != null) t.Font = _labelFont;
                     _tags.Add(textTag);
                 }
             }
@@ -999,8 +1092,10 @@ namespace NinjaTrader.NinjaScript.Indicators
                     else if (isAbove && gexAboveDrawn < halfMax) shouldShow = true;
                     else if (!isAbove && gexBelowDrawn < halfMax) shouldShow = true;
                 }
-                else if (isSystem && ShowSystemLevels) shouldShow = true;
-                else if (isStructure && ShowStructureLevels) shouldShow = true;
+                else if (isSystem && (ShowSystemLevels || (lvl.Type == "ZG" && ShowZeroGamma))) shouldShow = true;
+                // Structure (PDH/PDL/PWH/PWL) is now computed locally (DrawPALevels), not from the
+                // feed — Mother is GEX-only. Feed structure, if any, is intentionally not drawn here.
+                else if (isStructure) shouldShow = false;
 
                 if (!shouldShow || !inRange)
                     continue;
@@ -1030,7 +1125,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 string lineTag = $"TLADeLine_{key}";
                 DashStyleHelper lineStyle = isGex ? DashStyleHelper.Solid :
                                             isSystem ? DashStyleHelper.Dash : DashStyleHelper.Dot;
-                int lineWidth = (lvl.Type == "ZG" || lvl.Type == "MP") ? 2 : 1;
+                int userW = Math.Max(1, Math.Min(10, LevelLineWidth));
+                int lineWidth = (lvl.Type == "ZG" || lvl.Type == "MP") ? Math.Max(2, userW) : userW;
                 Draw.Line(this, lineTag, false, leftBarsAgo, y, rightBarsAgo, y, lvlBrush, lineStyle, lineWidth);
                 _tags.Add(lineTag);
 
@@ -1261,6 +1357,9 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Display(Name = "Show Structure Levels (PDH/PDL/PWH/PWL)", GroupName = "Level Visibility", Order = 2)]
         public bool ShowStructureLevels { get; set; }
 
+        [Display(Name = "Show Zero Gamma line (even when System off)", GroupName = "Level Visibility", Order = 8)]
+        public bool ShowZeroGamma { get; set; }
+
         [Range(1, 999)]
         [Display(Name = "Max GEX Levels (999=All)", GroupName = "Level Visibility", Order = 3)]
         public int MaxGexLevels { get; set; }
@@ -1319,6 +1418,10 @@ namespace NinjaTrader.NinjaScript.Indicators
         [Range(0, 2000)]
         [Display(Name = "Line Right Bars (from label)", GroupName = "Price Levels Style", Order = 3)]
         public int LineRightBars { get; set; }
+
+        [Range(1, 10)]
+        [Display(Name = "Level Line Width (GEX/system)", GroupName = "Price Levels Style", Order = 4)]
+        public int LevelLineWidth { get; set; }
 
         [Display(Name = "Show Profile Bars (P:)", GroupName = "Profile", Order = 0)]
         public bool ShowProfileBars { get; set; }

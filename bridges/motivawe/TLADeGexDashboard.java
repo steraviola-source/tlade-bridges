@@ -660,6 +660,46 @@ public class TLADeGexDashboard extends Study
         d.label = showLabels ? (formatPrice(lvl.esStrike) + " " + lvl.label) : "";
         newLevels.add(d);
       }
+
+      // v3.x — local Structure (PDH/PDL/PWH/PWL) from chart bars (Mother is GEX-only;
+      // price-dependent levels computed front-end-side, no longer shipped in the feed).
+      if (showStructure) {
+        String[] paLabels = { "PDH", "PDL", "PWH", "PWL" };
+        java.awt.Color paColor = new java.awt.Color(0x94, 0xA3, 0xB8);
+        for (double[] pa : computeLocalPA(ctx.getDataSeries())) {
+          double yy = pa[0];
+          boolean inR = !onlyNear || (Math.abs(spot - yy) / Math.max(1e-9, spot) * 100.0 <= nearPct);
+          if (!inR) continue;
+          DrawLevel dl = new DrawLevel();
+          dl.price = yy;
+          dl.color = paColor;
+          dl.gex = false;
+          dl.sys = false;
+          dl.lineWidth = 1;
+          dl.label = showLabels ? (formatPrice(yy) + " " + paLabels[(int) pa[1]]) : "";
+          newLevels.add(dl);
+        }
+      }
+
+      // v3.x — local Breakout (BOS H4/H1) from chart bars (Mother is GEX-only; price-dependent
+      // levels computed front-end-side, 1:1 with NT8/ATAS/terminal).
+      if (getSettings().getBoolean(SHOW_BREAKOUT, true)) {
+        java.awt.Color bullC = new java.awt.Color(0x10, 0xB9, 0x81);
+        java.awt.Color bearC = new java.awt.Color(0xF4, 0x3F, 0x5E);
+        for (Object[] b : computeLocalBOS(ctx.getDataSeries())) {
+          double yb = (Double) b[0];
+          boolean inR = !onlyNear || (Math.abs(spot - yb) / Math.max(1e-9, spot) * 100.0 <= nearPct);
+          if (!inR) continue;
+          DrawLevel db = new DrawLevel();
+          db.price = yb;
+          db.color = ((Boolean) b[2]) ? bullC : bearC;
+          db.gex = false;
+          db.sys = false;
+          db.lineWidth = 1;
+          db.label = showLabels ? (formatPrice(yb) + " " + (String) b[1]) : "";
+          newLevels.add(db);
+        }
+      }
     }
 
     // ---- Profile ----
@@ -825,6 +865,136 @@ public class TLADeGexDashboard extends Study
       case "QQQ": return (esPrice - nqNdx) / 40.0;
       default:    return esPrice; // ES
     }
+  }
+
+  // Local Structure: PDH/PDL = prior futures-day (18:00 ET) high/low; PWH/PWL = prior week high/low.
+  // Computed from the chart's own bars (display price) — Mother is GEX-only, so price-dependent
+  // levels live in each front-end, no longer shipped in the feed. Returns {price, kind} where
+  // kind = 0:PDH 1:PDL 2:PWH 3:PWL. java.time is fully-qualified to avoid touching imports.
+  private java.util.List<double[]> computeLocalPA(DataSeries series)
+  {
+    java.util.List<double[]> out = new java.util.ArrayList<>();
+    if (series == null) return out;
+    int n = series.size();
+    if (n < 2) return out;
+    java.time.ZoneId etZone = java.time.ZoneId.of("America/New_York");
+    java.util.TreeMap<Long, double[]> day = new java.util.TreeMap<>();
+    for (int i = 0; i < n; i++) {
+      long t = series.getStartTime(i);
+      java.time.ZonedDateTime et = java.time.Instant.ofEpochMilli(t).atZone(etZone);
+      java.time.LocalDate fd = (et.getHour() >= 18) ? et.toLocalDate().plusDays(1) : et.toLocalDate();
+      long key = fd.toEpochDay();
+      double h = series.getHigh(i), l = series.getLow(i);
+      double[] hl = day.get(key);
+      if (hl == null) day.put(key, new double[] { h, l });
+      else { if (h > hl[0]) hl[0] = h; if (l < hl[1]) hl[1] = l; }
+    }
+    java.util.List<Long> dk = new java.util.ArrayList<>(day.keySet());
+    if (dk.size() >= 2) {
+      double[] pd = day.get(dk.get(dk.size() - 2)); // prior completed day (last = current)
+      out.add(new double[] { pd[0], 0 });
+      out.add(new double[] { pd[1], 1 });
+    }
+    java.util.TreeMap<Long, double[]> week = new java.util.TreeMap<>();
+    for (Long d : dk) {
+      java.time.LocalDate ld = java.time.LocalDate.ofEpochDay(d);
+      java.time.LocalDate mon = ld.minusDays((ld.getDayOfWeek().getValue() + 6) % 7); // Monday of week
+      long wk = mon.toEpochDay();
+      double[] dhl = day.get(d);
+      double[] whl = week.get(wk);
+      if (whl == null) week.put(wk, new double[] { dhl[0], dhl[1] });
+      else { if (dhl[0] > whl[0]) whl[0] = dhl[0]; if (dhl[1] < whl[1]) whl[1] = dhl[1]; }
+    }
+    java.util.List<Long> wk2 = new java.util.ArrayList<>(week.keySet());
+    if (wk2.size() >= 2) {
+      double[] pw = week.get(wk2.get(wk2.size() - 2));
+      out.add(new double[] { pw[0], 2 });
+      out.add(new double[] { pw[1], 3 });
+    }
+    return out;
+  }
+
+  // Local Breakout (BOS): H4/H1 from the chart's own bars, 18:00 ET anchor — 1:1 with the NT8/ATAS
+  // bridges and the terminal (most recent valid bull + bear per timeframe). No feed dependency.
+  // Bars aggregated as {high, low, close}. java.time fully-qualified so imports stay untouched.
+  private java.util.List<double[]> aggregateByEtPeriod(DataSeries series, int barCount, int periodMinutes)
+  {
+    java.util.List<double[]> out = new java.util.ArrayList<>();
+    java.time.ZoneId etZone = java.time.ZoneId.of("America/New_York");
+    boolean has = false; long curSlot = Long.MIN_VALUE;
+    double curH = 0, curL = 0, curC = 0;
+    final long anchor = 18L * 60L; // 18:00 ET
+    for (int i = 0; i < barCount; i++) {
+      long t = series.getStartTime(i);
+      java.time.ZonedDateTime et = java.time.Instant.ofEpochMilli(t).atZone(etZone);
+      long etMin = et.toLocalDate().toEpochDay() * 1440L + et.getHour() * 60L + et.getMinute();
+      long slot = Math.floorDiv(etMin - anchor, periodMinutes) * periodMinutes + anchor;
+      double h = series.getHigh(i), l = series.getLow(i), c = series.getClose(i);
+      if (!has || slot != curSlot) {
+        if (has) out.add(new double[] { curH, curL, curC });
+        has = true; curSlot = slot; curH = h; curL = l; curC = c;
+      } else {
+        if (h > curH) curH = h;
+        if (l < curL) curL = l;
+        curC = c;
+      }
+    }
+    if (has) out.add(new double[] { curH, curL, curC });
+    return out;
+  }
+
+  private static boolean isQualityBreakout(double[] curr, double[] prev, boolean bull)
+  {
+    // arr = {high, low, close}
+    if (bull) {
+      if (curr[2] <= prev[0]) return false;
+      double bodyAbove = curr[2] - prev[0], upperShadow = curr[0] - curr[2];
+      return bodyAbove > upperShadow && bodyAbove > 0;
+    } else {
+      if (curr[2] >= prev[1]) return false;
+      double bodyBelow = prev[1] - curr[2], lowerShadow = curr[2] - curr[1];
+      return bodyBelow > lowerShadow && bodyBelow > 0;
+    }
+  }
+
+  // out entries: {price, bull ? 1 : 0}
+  private void detectBosInto(java.util.List<double[]> c, java.util.List<double[]> out)
+  {
+    if (c.size() < 3) return;
+    boolean foundBull = false, foundBear = false;
+    for (int i = c.size() - 2; i >= 2 && (!foundBull || !foundBear); i--) {
+      double[] curr = c.get(i); double[] prev = c.get(i - 1);
+      if (!foundBull && isQualityBreakout(curr, prev, true)) {
+        boolean valid = true;
+        for (int j = i + 1; j < c.size(); j++) if (c.get(j)[2] < prev[0]) { valid = false; break; }
+        if (valid) { out.add(new double[] { prev[0], 1 }); foundBull = true; }
+      }
+      if (!foundBear && isQualityBreakout(curr, prev, false)) {
+        boolean valid = true;
+        for (int j = i + 1; j < c.size(); j++) if (c.get(j)[2] > prev[1]) { valid = false; break; }
+        if (valid) { out.add(new double[] { prev[1], 0 }); foundBear = true; }
+      }
+    }
+  }
+
+  // returns {price, label, bull} per detected BOS
+  private java.util.List<Object[]> computeLocalBOS(DataSeries series)
+  {
+    java.util.List<Object[]> out = new java.util.ArrayList<>();
+    if (series == null) return out;
+    int n = series.size();
+    if (n < 3) return out;
+    String[] tfs = { "H4", "H1" };
+    int[] periods = { 240, 60 };
+    for (int k = 0; k < 2; k++) {
+      java.util.List<double[]> found = new java.util.ArrayList<>();
+      detectBosInto(aggregateByEtPeriod(series, n, periods[k]), found);
+      for (double[] f : found) {
+        boolean bull = f[1] > 0.5;
+        out.add(new Object[] { f[0], "BOS " + tfs[k] + (bull ? " L" : " S"), bull });
+      }
+    }
+    return out;
   }
 
   private String formatPrice(double esPrice)

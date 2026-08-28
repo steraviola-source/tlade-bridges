@@ -126,6 +126,8 @@ namespace ATAS.Indicators.Technical
         // longer in the published snapshot; we reproduce the Break-of-Structure
         // here from native chart candles instead of relying on the feed.
         private readonly List<LevelEntry> _localBos = new List<LevelEntry>();
+        private readonly List<LevelEntry> _localPA = new List<LevelEntry>();
+        private int _paLastComputedBars = -1;
         private int _bosLastComputedBars = -1;
         private DateTime _lastAsiaAnchor = DateTime.MinValue;
         private DateTime _lastEUAnchor   = DateTime.MinValue;
@@ -588,7 +590,7 @@ namespace ATAS.Indicators.Technical
             try
             {
                 var tz = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
-                var utc = barTime.Kind == DateTimeKind.Utc ? barTime : barTime.ToUniversalTime();
+                var utc = barTime.Kind == DateTimeKind.Utc ? barTime : DateTime.SpecifyKind(barTime, DateTimeKind.Utc);
                 return TimeZoneInfo.ConvertTimeFromUtc(utc, tz);
             }
             catch
@@ -596,7 +598,7 @@ namespace ATAS.Indicators.Technical
                 try
                 {
                     var tz = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
-                    var utc = barTime.Kind == DateTimeKind.Utc ? barTime : barTime.ToUniversalTime();
+                    var utc = barTime.Kind == DateTimeKind.Utc ? barTime : DateTime.SpecifyKind(barTime, DateTimeKind.Utc);
                     return TimeZoneInfo.ConvertTimeFromUtc(utc, tz);
                 }
                 catch { return barTime.AddHours(-5); }
@@ -900,6 +902,14 @@ namespace ATAS.Indicators.Technical
                     // CurrentBar is the bar COUNT — valid indices are 0..CurrentBar-1.
                     ComputeLocalBos(CurrentBar);
                     snap.AddRange(_localBos);
+                }
+
+                // Local Structure (PDH/PDL/PWH/PWL) from the chart's own bars — Mother is GEX-only,
+                // price-dependent levels are computed front-end-side. Added before the snap.Count gate.
+                if (ShowStructureLevels)
+                {
+                    ComputeLocalPA(CurrentBar);
+                    snap.AddRange(_localPA);
                 }
 
                 if (snap.Count == 0) return;
@@ -1370,6 +1380,67 @@ namespace ATAS.Indicators.Technical
                 Magnitude = 0,
                 GexSign = 0
             };
+        }
+
+        private LevelEntry MakePA(double chartPrice, string type)
+        {
+            return new LevelEntry
+            {
+                RawStrike = ChartToRaw(chartPrice),
+                Type = type,        // PDH/PDL/PWH/PWL
+                Label = type,
+                Magnitude = 0,
+                GexSign = 0
+            };
+        }
+
+        // Local Structure: PDH/PDL = prior futures-day (18:00 ET) high/low; PWH/PWL = prior week
+        // (Monday-anchored) high/low, from the chart's own bars. Same futures-day + week logic as
+        // the terminal & the NT8 bridge, so all front-ends agree. Cloud PA is deprecated client-side.
+        private void ComputeLocalPA(int barCount)
+        {
+            if (barCount == _paLastComputedBars) return;
+            _paLastComputedBars = barCount;
+            _localPA.Clear();
+            if (barCount < 2) return;
+
+            var dayH = new SortedDictionary<DateTime, double>();
+            var dayL = new SortedDictionary<DateTime, double>();
+            for (int i = 0; i < barCount; i++)
+            {
+                var c = GetCandle(i);
+                if (c == null) continue;
+                var et = ToEt(c.Time);
+                var fd = (et.Hour >= 18 ? et.Date.AddDays(1) : et.Date);   // futures day (18:00 ET boundary)
+                double h = (double)c.High, l = (double)c.Low;
+                if (!dayH.ContainsKey(fd)) { dayH[fd] = h; dayL[fd] = l; }
+                else { if (h > dayH[fd]) dayH[fd] = h; if (l < dayL[fd]) dayL[fd] = l; }
+            }
+            var days = new List<DateTime>(dayH.Keys);
+            if (days.Count >= 2)
+            {
+                var pd = days[days.Count - 2];   // prior completed day (last = current, in-progress)
+                _localPA.Add(MakePA(dayH[pd], "PDH"));
+                _localPA.Add(MakePA(dayL[pd], "PDL"));
+            }
+
+            var weekH = new SortedDictionary<DateTime, double>();
+            var weekL = new SortedDictionary<DateTime, double>();
+            foreach (var d in days)
+            {
+                int dow = (int)d.DayOfWeek;                 // Sunday = 0
+                int back = (dow == 0 ? 6 : dow - 1);        // days since Monday
+                var wk = d.AddDays(-back).Date;             // Monday of that week
+                if (!weekH.ContainsKey(wk)) { weekH[wk] = dayH[d]; weekL[wk] = dayL[d]; }
+                else { if (dayH[d] > weekH[wk]) weekH[wk] = dayH[d]; if (dayL[d] < weekL[wk]) weekL[wk] = dayL[d]; }
+            }
+            var weeks = new List<DateTime>(weekH.Keys);
+            if (weeks.Count >= 2)
+            {
+                var pw = weeks[weeks.Count - 2];
+                _localPA.Add(MakePA(weekH[pw], "PWH"));
+                _localPA.Add(MakePA(weekL[pw], "PWL"));
+            }
         }
 
         // = clientEngineService.computeAllBOS: W / D / H4 / H1, all of them.

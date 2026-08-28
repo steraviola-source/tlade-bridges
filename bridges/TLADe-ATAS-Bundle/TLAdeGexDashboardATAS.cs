@@ -119,6 +119,16 @@ namespace ATAS.Indicators.Technical
         private decimal _snapUSumPV, _snapUSumV;
         private decimal _snapPDSumPV, _snapPDSumV;
         private int _avwapLastComputedBar = -1;
+
+        // v3.2 — local multi-TF BOS (W/D/H4/H1), computed from the chart's own
+        // bars (1:1 port of terminal clientEngineService.computeAllBOS). PA moved
+        // client-side on the TLADe cloud, so technicalLevels (BOdl/BOds) are no
+        // longer in the published snapshot; we reproduce the Break-of-Structure
+        // here from native chart candles instead of relying on the feed.
+        private readonly List<LevelEntry> _localBos = new List<LevelEntry>();
+        private readonly List<LevelEntry> _localPA = new List<LevelEntry>();
+        private int _paLastComputedBars = -1;
+        private int _bosLastComputedBars = -1;
         private DateTime _lastAsiaAnchor = DateTime.MinValue;
         private DateTime _lastEUAnchor   = DateTime.MinValue;
         private DateTime _lastUSAnchor   = DateTime.MinValue;
@@ -580,7 +590,7 @@ namespace ATAS.Indicators.Technical
             try
             {
                 var tz = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
-                var utc = barTime.Kind == DateTimeKind.Utc ? barTime : barTime.ToUniversalTime();
+                var utc = barTime.Kind == DateTimeKind.Utc ? barTime : DateTime.SpecifyKind(barTime, DateTimeKind.Utc);
                 return TimeZoneInfo.ConvertTimeFromUtc(utc, tz);
             }
             catch
@@ -588,7 +598,7 @@ namespace ATAS.Indicators.Technical
                 try
                 {
                     var tz = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
-                    var utc = barTime.Kind == DateTimeKind.Utc ? barTime : barTime.ToUniversalTime();
+                    var utc = barTime.Kind == DateTimeKind.Utc ? barTime : DateTime.SpecifyKind(barTime, DateTimeKind.Utc);
                     return TimeZoneInfo.ConvertTimeFromUtc(utc, tz);
                 }
                 catch { return barTime.AddHours(-5); }
@@ -882,6 +892,25 @@ namespace ATAS.Indicators.Technical
                 if (ShowAvwapEU)   DrawAvwapPolyline(ctx, _avwapEU,   AVWAP_COLOR_EU,   "EU");
                 if (ShowAvwapUS)   DrawAvwapPolyline(ctx, _avwapUS,   AVWAP_COLOR_US,   "US");
                 if (ShowAvwapPD)   DrawAvwapPolyline(ctx, _avwapPD,   AVWAP_COLOR_PD,   "PD");
+
+                // v3.2 — local multi-TF BOS (W/D/H4/H1) computed from the chart's
+                // native bars (1:1 with terminal computeAllBOS). Cloud PA is
+                // deprecated client-side, so these are computed here. Added before
+                // the snap.Count gate so they render even with no cloud levels.
+                if (ShowBreakoutLevels)
+                {
+                    // CurrentBar is the bar COUNT — valid indices are 0..CurrentBar-1.
+                    ComputeLocalBos(CurrentBar);
+                    snap.AddRange(_localBos);
+                }
+
+                // Local Structure (PDH/PDL/PWH/PWL) from the chart's own bars — Mother is GEX-only,
+                // price-dependent levels are computed front-end-side. Added before the snap.Count gate.
+                if (ShowStructureLevels)
+                {
+                    ComputeLocalPA(CurrentBar);
+                    snap.AddRange(_localPA);
+                }
 
                 if (snap.Count == 0) return;
 
@@ -1217,6 +1246,239 @@ namespace ATAS.Indicators.Technical
         private double EffectiveEsSpread =>
             ManualSpreadOverride > 0 ? ManualSpreadOverride : EsSpxSpread;
 
+        // ──────────────────────────────────────────────────────────────────────
+        //  LOCAL BOS — v3.2  (1:1 port of terminal clientEngineService.computeAllBOS)
+        //  Multi-timeframe Break-of-Structure: W / D / H4 / H1 — ALL of them, like
+        //  the terminal (no per-TF toggles, no defaults invented). For each TF the
+        //  most recent quality bull + bear BOS is detected (bull -> level at prior
+        //  high, bear -> prior low), validated by no later close back through it.
+        //  All bars are aggregated from the chart's OWN candles (native ES/NQ price,
+        //  no spread, no cloud): daily by ET day, weekly by ISO week, H4/H1 by
+        //  240/60-min buckets anchored at 18:00 ET (Globex open) — same as the terminal.
+        // ──────────────────────────────────────────────────────────────────────
+        private struct DBar { public DateTime Day; public double H, L, C; }
+
+        private static bool IsQualityBreakout(DBar curr, DBar prev, bool bull)
+        {
+            if (bull)
+            {
+                if (curr.C <= prev.H) return false;
+                double bodyAbove = curr.C - prev.H;
+                double upperShadow = curr.H - curr.C;
+                return bodyAbove > upperShadow && bodyAbove > 0;
+            }
+            else
+            {
+                if (curr.C >= prev.L) return false;
+                double bodyBelow = prev.L - curr.C;
+                double lowerShadow = curr.C - curr.L;
+                return bodyBelow > lowerShadow && bodyBelow > 0;
+            }
+        }
+
+        // Chart bars -> daily bars by ET calendar day.
+        private List<DBar> BuildDailyBars(int barCount)
+        {
+            var days = new List<DBar>();
+            bool has = false; DateTime curDay = DateTime.MinValue; DBar cur = default;
+            for (int i = 0; i < barCount; i++)
+            {
+                var c = GetCandle(i);
+                if (c == null) continue;
+                DateTime day = ToEt(c.Time).Date;
+                if (!has || day != curDay)
+                {
+                    if (has) days.Add(cur);
+                    curDay = day; has = true;
+                    cur = new DBar { Day = day, H = (double)c.High, L = (double)c.Low, C = (double)c.Close };
+                }
+                else
+                {
+                    if ((double)c.High > cur.H) cur.H = (double)c.High;
+                    if ((double)c.Low  < cur.L) cur.L = (double)c.Low;
+                    cur.C = (double)c.Close;
+                }
+            }
+            if (has) days.Add(cur);
+            return days;
+        }
+
+        // Daily -> weekly by ISO week (= clientEngineService.aggregateToWeekly).
+        private static List<DBar> AggregateToWeekly(List<DBar> daily)
+        {
+            var outl = new List<DBar>();
+            bool has = false; int curKey = int.MinValue; DBar cur = default;
+            foreach (var d in daily)
+            {
+                int key = System.Globalization.ISOWeek.GetYear(d.Day) * 100 + System.Globalization.ISOWeek.GetWeekOfYear(d.Day);
+                if (!has || key != curKey) { if (has) outl.Add(cur); has = true; curKey = key; cur = d; }
+                else { if (d.H > cur.H) cur.H = d.H; if (d.L < cur.L) cur.L = d.L; cur.C = d.C; }
+            }
+            if (has) outl.Add(cur);
+            return outl;
+        }
+
+        private static long FloorDiv(long a, long b) { long q = a / b; if ((a % b != 0) && ((a < 0) != (b < 0))) q--; return q; }
+
+        // Chart bars -> period buckets (minutes) anchored at 18:00 ET (Globex open),
+        // = clientEngineService.aggregateCandles. Used for H4 (240) and H1 (60).
+        private List<DBar> AggregateByEtPeriod(int barCount, int periodMinutes)
+        {
+            var outl = new List<DBar>();
+            bool has = false; long curSlot = long.MinValue; DBar cur = default;
+            var epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Unspecified);
+            const long anchor = 18 * 60; // 18:00 ET, minutes
+            for (int i = 0; i < barCount; i++)
+            {
+                var c = GetCandle(i);
+                if (c == null) continue;
+                var et = ToEt(c.Time);
+                long etMin = (long)Math.Floor((et - epoch).TotalMinutes);
+                long slot = FloorDiv(etMin - anchor, periodMinutes) * periodMinutes + anchor;
+                if (!has || slot != curSlot)
+                {
+                    if (has) outl.Add(cur);
+                    has = true; curSlot = slot;
+                    cur = new DBar { Day = et.Date, H = (double)c.High, L = (double)c.Low, C = (double)c.Close };
+                }
+                else { if ((double)c.High > cur.H) cur.H = (double)c.High; if ((double)c.Low < cur.L) cur.L = (double)c.Low; cur.C = (double)c.Close; }
+            }
+            if (has) outl.Add(cur);
+            return outl;
+        }
+
+        // = clientEngineService.detectBOS: most recent valid bull + bear BOS.
+        private void DetectBosInto(List<DBar> c, string tf, List<LevelEntry> outList)
+        {
+            if (c.Count < 3) return;
+            bool foundBull = false, foundBear = false;
+            for (int i = c.Count - 2; i >= 2 && (!foundBull || !foundBear); i--)
+            {
+                var curr = c[i]; var prev = c[i - 1];
+                if (!foundBull && IsQualityBreakout(curr, prev, true))
+                {
+                    bool valid = true;
+                    for (int j = i + 1; j < c.Count; j++) if (c[j].C < prev.H) { valid = false; break; }
+                    if (valid) { outList.Add(MakeBos(prev.H, true, tf)); foundBull = true; }
+                }
+                if (!foundBear && IsQualityBreakout(curr, prev, false))
+                {
+                    bool valid = true;
+                    for (int j = i + 1; j < c.Count; j++) if (c[j].C > prev.L) { valid = false; break; }
+                    if (valid) { outList.Add(MakeBos(prev.L, false, tf)); foundBear = true; }
+                }
+            }
+        }
+
+        private LevelEntry MakeBos(double chartPrice, bool bull, string tf)
+        {
+            return new LevelEntry
+            {
+                RawStrike = ChartToRaw(chartPrice),
+                Type = bull ? "BL" : "BS",
+                Label = "BOS " + tf + (bull ? " L" : " S"),
+                Magnitude = 0,
+                GexSign = 0
+            };
+        }
+
+        private LevelEntry MakePA(double chartPrice, string type)
+        {
+            return new LevelEntry
+            {
+                RawStrike = ChartToRaw(chartPrice),
+                Type = type,        // PDH/PDL/PWH/PWL
+                Label = type,
+                Magnitude = 0,
+                GexSign = 0
+            };
+        }
+
+        // Local Structure: PDH/PDL = prior futures-day (18:00 ET) high/low; PWH/PWL = prior week
+        // (Monday-anchored) high/low, from the chart's own bars. Same futures-day + week logic as
+        // the terminal & the NT8 bridge, so all front-ends agree. Cloud PA is deprecated client-side.
+        private void ComputeLocalPA(int barCount)
+        {
+            if (barCount == _paLastComputedBars) return;
+            _paLastComputedBars = barCount;
+            _localPA.Clear();
+            if (barCount < 2) return;
+
+            var dayH = new SortedDictionary<DateTime, double>();
+            var dayL = new SortedDictionary<DateTime, double>();
+            for (int i = 0; i < barCount; i++)
+            {
+                var c = GetCandle(i);
+                if (c == null) continue;
+                var et = ToEt(c.Time);
+                var fd = (et.Hour >= 18 ? et.Date.AddDays(1) : et.Date);   // futures day (18:00 ET boundary)
+                double h = (double)c.High, l = (double)c.Low;
+                if (!dayH.ContainsKey(fd)) { dayH[fd] = h; dayL[fd] = l; }
+                else { if (h > dayH[fd]) dayH[fd] = h; if (l < dayL[fd]) dayL[fd] = l; }
+            }
+            var days = new List<DateTime>(dayH.Keys);
+            if (days.Count >= 2)
+            {
+                var pd = days[days.Count - 2];   // prior completed day (last = current, in-progress)
+                _localPA.Add(MakePA(dayH[pd], "PDH"));
+                _localPA.Add(MakePA(dayL[pd], "PDL"));
+            }
+
+            var weekH = new SortedDictionary<DateTime, double>();
+            var weekL = new SortedDictionary<DateTime, double>();
+            foreach (var d in days)
+            {
+                int dow = (int)d.DayOfWeek;                 // Sunday = 0
+                int back = (dow == 0 ? 6 : dow - 1);        // days since Monday
+                var wk = d.AddDays(-back).Date;             // Monday of that week
+                if (!weekH.ContainsKey(wk)) { weekH[wk] = dayH[d]; weekL[wk] = dayL[d]; }
+                else { if (dayH[d] > weekH[wk]) weekH[wk] = dayH[d]; if (dayL[d] < weekL[wk]) weekL[wk] = dayL[d]; }
+            }
+            var weeks = new List<DateTime>(weekH.Keys);
+            if (weeks.Count >= 2)
+            {
+                var pw = weeks[weeks.Count - 2];
+                _localPA.Add(MakePA(weekH[pw], "PWH"));
+                _localPA.Add(MakePA(weekL[pw], "PWL"));
+            }
+        }
+
+        // = clientEngineService.computeAllBOS: W / D / H4 / H1, all of them.
+        private void ComputeLocalBos(int barCount)
+        {
+            if (barCount == _bosLastComputedBars) return;   // recompute only when bars change
+            _bosLastComputedBars = barCount;
+            _localBos.Clear();
+            // H1/H4: from the chart's OWN intraday candles — identical to the
+            // terminal (same ES minutes, same 18:00 ET anchor, same algorithm).
+            var h4 = AggregateByEtPeriod(barCount, 240);
+            var h1 = AggregateByEtPeriod(barCount, 60);
+            DetectBosInto(h4, "H4", _localBos);
+            DetectBosInto(h1, "H1", _localBos);
+
+            // TODO (WS): D/W. The terminal computes daily/weekly BOS from Yahoo
+            // ^GSPC CASH daily (fetchDailyCandles, interval=1d), NOT from the
+            // chart's futures bars — so aggregating the chart here would NOT match
+            // the terminal. To reproduce exactly, fetch ^GSPC (SPX) / ^NDX (NDX)
+            // 1y/1d from Yahoo, apply the S: spread, then DetectBosInto(.., "D"/"W").
+            // Skipped for now so we never show discrepant D/W levels.
+
+            Log($"BOS local: bars={barCount} h4={h4.Count} h1={h1.Count} found={_localBos.Count} ticker={ResolveTicker()}");
+        }
+
+        // BOS levels come from native chart candles (ES/NQ) — already in chart price,
+        // no spread. ChartToRaw maps to RawStrike space so the shared ConvertPrice()
+        // round-trips back to the same price (ES/NQ/SPX/NDX pass-through; SPY x10, QQQ x40).
+        private double ChartToRaw(double chartPrice)
+        {
+            switch (ResolveTicker())
+            {
+                case "SPY": return chartPrice * 10.0;
+                case "QQQ": return chartPrice * 40.0;
+                default:    return chartPrice;
+            }
+        }
+
         private double ConvertPrice(double rawStrike)
         {
             // The TLADe cloud publishes ES/NQ strikes ALREADY in futures space
@@ -1259,6 +1521,11 @@ namespace ATAS.Indicators.Technical
         {
             try
             {
+                // MyDocuments may be OneDrive-redirected (e.g. ...\OneDrive\Dokumente);
+                // AppendAllText does NOT create the dir, so create it or logging is
+                // silently lost.
+                var dir = Path.GetDirectoryName(_logPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
                 File.AppendAllText(_logPath,
                     $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [TLAdeGex] {msg}{Environment.NewLine}");
             }
