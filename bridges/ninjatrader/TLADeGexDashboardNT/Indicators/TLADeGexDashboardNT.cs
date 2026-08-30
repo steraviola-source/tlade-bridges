@@ -342,9 +342,10 @@ namespace NinjaTrader.NinjaScript.Indicators
             // the plots need per-bar values, unlike the static level overlays.
             ComputeAvwapCurrentBar();
 
-            // Skip the rest on historical bars — levels/boxes are static overlays,
-            // only need to draw/update on the real-time (latest) bar.
-            if (State == State.Historical)
+            // Levels/boxes are static overlays — only need the latest bar. Draw on the LAST
+            // loaded bar even during Historical, so a freshly-loaded / closed-market (weekend)
+            // chart renders immediately instead of waiting for a realtime tick that never comes.
+            if (State == State.Historical && CurrentBar < Bars.Count - 1)
                 return;
 
             TryAutoFetch();
@@ -529,7 +530,9 @@ namespace NinjaTrader.NinjaScript.Indicators
             // PD keeps accumulating on current-day bars (Pine behaviour).
             if (!asiaStart && _pdSumV > 0 && _inCurrentDay) { _pdSumPV += src * vol; _pdSumV += vol; }
 
-            bool recent = ShowHistoricalAvwap || Time[0] >= DateTime.Now.AddHours(-30);
+            // "recent" = within 30h of the chart's LAST bar (not wall-clock now) so a weekend /
+            // closed-market chart still shows the latest session's AVWAP instead of hiding everything.
+            bool recent = ShowHistoricalAvwap || Time[0] >= Bars.GetTime(Bars.Count - 1).AddHours(-30);
 
             SetAvwapPlot(0, ShowAvwapAsia && _asiaActive && _inCurrentDay && recent && _aSumV > 0 ? _aSumPV / _aSumV : double.NaN);
             SetAvwapPlot(1, ShowAvwapEU && _euActive && _inCurrentDay && recent && _eSumV > 0 ? _eSumPV / _eSumV : double.NaN);
@@ -718,7 +721,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         private void DrawSessionBoxes()
         {
             // Cap the scan: 30h unless historical toggle (then hard cap for perf).
-            DateTime cutoff = DateTime.Now.AddHours(-30);
+            DateTime cutoff = Bars.GetTime(Bars.Count - 1).AddHours(-30);   // relative to chart's last bar (weekend-safe)
             int maxScan = ShowHistoricalSessions ? Math.Min(CurrentBar, 20000) : CurrentBar;
 
             // Find the oldest barsAgo inside the window.
