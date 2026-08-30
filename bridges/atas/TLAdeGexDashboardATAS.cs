@@ -1138,7 +1138,10 @@ namespace ATAS.Indicators.Technical
                 DateTime? minEt = null;
                 if (!ShowHistoricalAvwap)
                 {
-                    minEt = AsiaAnchorFor(GetEtTime());
+                    // Clip to the last BAR's futures day (data-relative), not wall-clock now —
+                    // else a weekend / closed-market chart hides the latest session's AVWAP.
+                    var lastC = GetCandle(lastBar);
+                    minEt = AsiaAnchorFor(lastC != null ? ToEt(lastC.Time) : GetEtTime());
                 }
 
                 var pen = new RenderPen(color, AvwapLineWidth);
