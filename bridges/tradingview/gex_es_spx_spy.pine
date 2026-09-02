@@ -15,12 +15,25 @@ var float esSpxSpread = 0.0
 groupGex = "GEX Data"
 string WEEKLY_DATA = input.text_area("S:15.58|L:7529,ZG,ZERO GAMMA,Zero Gamma~Key pivot where dealer gamma flips~Price magnet,0;7496,MP,MAX PAIN,Max Pain~Strike with maximum option pain~Expiry target,0;7464,EH,EM HIGH,Expected Move HIGH~1-sigma upper boundary~Statistical resistance,0;7335,EL,EM LOW,Expected Move LOW~1-sigma lower boundary~Statistical support,0;7561,VH,VOL HIGH,Vol Band HIGH~Volatility-based resistance~ZG + 25% EM,0;7496,VL,VOL LOW,Vol Band LOW~Volatility-based support~ZG - 25% EM,0;7466,PW,Put Wall,Strike: 7466~From Spot: +0.26%~Tot GEX: -540.91M~C/P Ratio: 0.5~Hold: 71% | Break: 29%,540.9;7516,CW,Call Wall,Strike: 7516~From Spot: +0.93%~Tot GEX: 52.45M~C/P Ratio: 1.1~Hold: 77% | Break: 23%,52.4;7556,CW,Call Wall,Strike: 7556~From Spot: +1.46%~Tot GEX: 713.88M~C/P Ratio: 12.4~Hold: 69% | Break: 31%,713.9;7541,CW,Call Wall,Strike: 7541~From Spot: +1.26%~Tot GEX: 326.28M~C/P Ratio: 2.5~Hold: 70% | Break: 30%,326.3;7476,CW,Call Wall,Strike: 7476~From Spot: +0.39%~Tot GEX: 337.52M~C/P Ratio: 3.1~Hold: 64% | Break: 36%,337.5;7566,CW,Call Wall,Strike: 7566~From Spot: +1.60%~Tot GEX: 231.51M~C/P Ratio: 2.2~Hold: 68% | Break: 32%,231.5;7486,PW,Put Wall,Strike: 7486~From Spot: +0.52%~Tot GEX: -296.67M~C/P Ratio: 0.4~Hold: 76% | Break: 24%,296.7;7511,PW,Put Wall,Strike: 7511~From Spot: +0.86%~Tot GEX: -220.45M~C/P Ratio: 0.4~Hold: 79% | Break: 21%,220.5;7616,CW,Call Wall,Strike: 7616~From Spot: +2.27%~Tot GEX: 299.04M~C/P Ratio: 4.1~Hold: 62% | Break: 38%,299.0;7501,CW,Call Wall,Strike: 7501~From Spot: +0.73%~Tot GEX: 75.07M~C/P Ratio: 1.4~Hold: 76% | Break: 24%,75.1;7506,CW,Call Wall,Strike: 7506~From Spot: +0.79%~Tot GEX: 114.21M~C/P Ratio: 1.7~Hold: 60% | Break: 40%,114.2;7491,CW,Call Wall,Strike: 7491~From Spot: +0.59%~Tot GEX: 23.22M~C/P Ratio: 1.1~Hold: 77% | Break: 23%,23.2;7456,PW,Put Wall,Strike: 7456~From Spot: +0.12%~Tot GEX: -80.07M~C/P Ratio: 0.7~Hold: 75% | Break: 25%,80.1;7646,CW,Call Wall,Strike: 7646~From Spot: +2.67%~Tot GEX: 364.89M~C/P Ratio: 58.0~Hold: 60% | Break: 40%,364.9;7481,PW,Put Wall,Strike: 7481~From Spot: +0.46%~Tot GEX: -166.17M~C/P Ratio: 0.4~Hold: 75% | Break: 25%,166.2;7416,PW,Put Wall,Strike: 7416~From Spot: -0.42%~Tot GEX: -966.48M~C/P Ratio: 0.3~Hold: 53% | Break: 47%,966.5;7366,PW,Put Wall,Strike: 7366~From Spot: -1.09%~Tot GEX: -906.22M~C/P Ratio: 0.1~Hold: 56% | Break: 44%,906.2;7316,PW,Put Wall,Strike: 7316~From Spot: -1.76%~Tot GEX: -679.97M~C/P Ratio: 0.0~Hold: 57% | Break: 43%,680.0;7391,PW,Put Wall,Strike: 7391~From Spot: -0.75%~Tot GEX: -595.06M~C/P Ratio: 0.1~Hold: 57% | Break: 43%,595.1;7446,PW,Put Wall,Strike: 7446~From Spot: -0.01%~Tot GEX: -295.97M~C/P Ratio: 0.4~Hold: 58% | Break: 42%,296.0;7401,PW,Put Wall,Strike: 7401~From Spot: -0.62%~Tot GEX: -512.41M~C/P Ratio: 0.1~Hold: 62% | Break: 38%,512.4;7341,PW,Put Wall,Strike: 7341~From Spot: -1.42%~Tot GEX: -590.78M~C/P Ratio: 0.0~Hold: 59% | Break: 41%,590.8;7426,PW,Put Wall,Strike: 7426~From Spot: -0.28%~Tot GEX: -342.07M~C/P Ratio: 0.2~Hold: 55% | Break: 45%,342.1;7291,PW,Put Wall,Strike: 7291~From Spot: -2.09%~Tot GEX: -445.13M~C/P Ratio: 0.0~Hold: 57% | Break: 43%,445.1;7441,PW,Put Wall,Strike: 7441~From Spot: -0.08%~Tot GEX: -276.49M~C/P Ratio: 0.2~Hold: 57% | Break: 43%,276.5;7241,PW,Put Wall,Strike: 7241~From Spot: -2.77%~Tot GEX: -435.81M~Hold: 56% | Break: 44%,435.8;7351,PW,Put Wall,Strike: 7351~From Spot: -1.29%~Tot GEX: -418.41M~C/P Ratio: 0.0~Hold: 61% | Break: 39%,418.4;7216,PW,Put Wall,Strike: 7216~From Spot: -3.10%~Tot GEX: -421.62M~Hold: 56% | Break: 44%,421.6;7371,PW,Put Wall,Strike: 7371~From Spot: -1.02%~Tot GEX: -274.51M~C/P Ratio: 0.1~Hold: 62% | Break: 38%,274.5;7356,PW,Put Wall,Strike: 7356~From Spot: -1.22%~Tot GEX: -333.86M~C/P Ratio: 0.0~Hold: 61% | Break: 39%,333.9|P:6116,-0.2,-1;6216,-0.1,-1;6266,-0.1,-1;6316,-0.2,-1;6341,-0.3,-1;6416,-0.3,-1;6441,-0.1,-1;6466,-0.2,-1;6516,-0.4,-1;6616,-0.4,-1;6666,-0.3,-1;6691,-0.3,-1;6716,-0.2,-1;6766,-0.3,-1;6816,-0.3,-1;6866,-0.3,-1;6916,-0.8,-1;6941,-0.4,-1;6966,-0.5,-1;6991,-0.2,-1;6996,-0.1,-1;7016,-0.7,-1;7041,-0.6,-1;7046,-0.5,-1;7056,-0.1,-1;7066,-0.7,-1;7076,-0.2,-1;7086,-1.6,-1;7091,-0.1,-1;7106,-0.1,-1;7116,-0.9,-1;7126,-0.2,-1;7136,-0.1,-1;7141,-0.2,-1;7146,-0.1,-1;7151,-0.3,-1;7166,-1.7,-1;7171,-0.2,-1;7176,-2.3,-1;7181,-0.1,-1;7186,-0.2,-1;7191,-2.0,-1;7196,-0.2,-1;7201,-0.1,-1;7206,-0.2,-1;7211,-0.2,-1;7216,-4.4,-1;7221,-0.2,-1;7226,-1.6,-1;7231,-0.2,-1;7236,-1.2,-1;7241,-4.5,-1;7246,-0.4,-1;7251,-0.4,-1;7256,-0.4,-1;7261,-0.5,-1;7266,-3.5,-1;7271,-1.0,-1;7276,-0.6,-1;7281,-0.9,-1;7286,-0.6,-1;7291,-4.6,-1;7296,-0.9,-1;7301,-0.7,-1;7306,-0.6,-1;7311,-0.5,-1;7316,-7.0,-1;7321,-0.8,-1;7326,-2.7,-1;7331,-1.5,-1;7336,-3.1,-1;7341,-6.1,-1;7346,-0.8,-1;7351,-4.3,-1;7356,-3.5,-1;7361,-2.1,-1;7366,-9.4,-1;7371,-2.8,-1;7376,-0.8,-1;7381,-0.9,-1;7386,-0.7,-1;7391,-6.2,-1;7396,-1.7,-1;7401,-5.3,-1;7406,-2.0,-1;7411,-2.6,-1;7416,-10.0,-1;7421,-1.7,-1;7426,-3.5,-1;7431,-1.0,-1;7436,-0.9,-1;7441,-2.9,-1;7446,-3.1,-1;7451,-0.8,-1;7456,-0.8,-1;7461,-0.6,-1;7466,-5.6,-1;7471,-1.2,-1;7476,3.5,1;7481,-1.7,-1;7486,-3.1,-1;7491,0.2,1;7496,3.0,1;7501,0.8,1;7506,1.2,1;7511,-2.3,-1;7516,0.5,1;7521,0.7,1;7526,0.5,1;7531,0.4,1;7536,1.0,1;7541,3.4,1;7546,1.2,1;7551,0.6,1;7556,7.4,1;7561,0.3,1;7566,2.4,1;7571,1.5,1;7576,1.1,1;7581,1.0,1;7586,0.9,1;7596,1.2,1;7601,0.3,1;7606,1.4,1;7611,1.2,1;7616,3.1,1;7621,0.7,1;7626,0.9,1;7631,0.7,1;7636,0.8,1;7641,1.0,1;7646,3.8,1;7651,0.8,1;7656,0.8,1;7661,1.3,1;7666,2.0,1;7671,0.6,1;7676,0.8,1;7681,2.3,1;7686,0.6,1;7691,1.2,1;7696,0.6,1;7701,2.0,1;7706,0.4,1;7711,0.4,1;7716,2.3,1;7721,1.8,1;7726,0.6,1;7731,0.3,1;7736,0.2,1;7741,0.8,1;7746,0.9,1;7751,0.8,1;7756,0.2,1;7766,0.9,1;7771,0.1,1;7776,0.4,1;7781,1.2,1;7786,0.3,1;7791,0.4,1;7796,0.3,1;7801,1.1,1;7806,0.5,1;7811,0.2,1;7816,1.1,1;7821,1.1,1;7826,0.3,1;7841,0.3,1;7866,0.2,1;7891,0.5,1;7916,0.1,1;7966,0.1,1")
 gexDataInput = input.text_area("", title="Live GEX Override", group=groupGex, tooltip="Paste live data to override weekly. Leave empty for weekly.")
-string gexDataActive = gexDataInput != "" ? gexDataInput : WEEKLY_DATA
+string gexDataRaw = gexDataInput != "" ? gexDataInput : WEEKLY_DATA
+// Robustness: iOS copy/paste can URL-encode the string ("|" -> "%7C",
+// space -> "%20") and lowercase the leading "S:". Decode here so the parser
+// reads it regardless of how it was copied. Guarded on "%7C" (level tooltips
+// already contain "%", e.g. "Break: 20%"). No-op for a clean desktop paste.
+string gexDataActive = gexDataRaw
+if str.contains(gexDataActive, "%7C") or str.contains(gexDataActive, "%7c")
+    gexDataActive := str.replace_all(gexDataActive, "%7C", "|")
+    gexDataActive := str.replace_all(gexDataActive, "%7c", "|")
+    gexDataActive := str.replace_all(gexDataActive, "%20", " ")
+if str.startswith(gexDataActive, "s:")
+    gexDataActive := "S:" + str.substring(gexDataActive, 2)
 
 groupGexVis = "GEX Visibility"
 showGexLevels = input.bool(true, "Call/Put Walls", group=groupGexVis)
 showSystemLevels = input.bool(true, "System (ZG, MaxPain, EM, VolBands)", group=groupGexVis)
 showStructureLevels = input.bool(true, "Structure (PDH/PDL/PWH/PWL)", group=groupGexVis)
+showCharmMagnet = input.bool(true, "Charm Magnet", group=groupGexVis)
+showDeltaFlip = input.bool(true, "Delta Flip", group=groupGexVis)
 showProfile = input.bool(true, "GEX Profile Bars", group=groupGexVis)
 maxLevelsChoice = input.string("10", "Max GEX Levels", options=["5", "10", "15", "20", "All"], group=groupGexVis)
 int maxVisibleLevels = maxLevelsChoice == "All" ? 999 : int(str.tonumber(maxLevelsChoice))
@@ -35,10 +48,10 @@ barThickness = input.int(8, "Bar Height", group=groupProfile, inline="p1")
 profileOffset = input.int(15, "Offset", group=groupProfile)
 
 groupBOS = "Breakout Structure (BOS)"
-showBOS_M = input.bool(true, "Monthly", group=groupBOS, inline="bos0")
-showBOS_W = input.bool(true, "Weekly", group=groupBOS, inline="bos0")
-showBOS_D = input.bool(true, "Daily", group=groupBOS, inline="bos1")
-showBOS_H4 = input.bool(true, "4H", group=groupBOS, inline="bos1")
+showBOS_M = input.bool(false, "Monthly", group=groupBOS, inline="bos0")
+showBOS_W = input.bool(false, "Weekly", group=groupBOS, inline="bos0")
+showBOS_D = input.bool(false, "Daily", group=groupBOS, inline="bos1")
+showBOS_H4 = input.bool(false, "4H", group=groupBOS, inline="bos1")
 showBOS_H1 = input.bool(false, "1H", group=groupBOS, inline="bos2")
 bosLineWidth = input.int(2, "BOS Line Width", minval=1, maxval=4, group=groupBOS)
 colorBOS_Bull = input.color(#22c55e, "Bull", group=groupBOS, inline="bosc")
@@ -78,6 +91,8 @@ colorMaxPain = input.color(#ef4444, "Max Pain", group=groupCol, inline="sys1")
 colorEM = input.color(#3b82f6, "Expected Move", group=groupCol, inline="sys2")
 colorVolBand = input.color(#9ca3af, "Vol Bands", group=groupCol, inline="sys2")
 colorStructure = input.color(#9ca3af, "Structure", group=groupCol)
+colorCharm = input.color(#f97316, "Charm Magnet", group=groupCol)
+colorDeltaFlip = input.color(#f59e0b, "Delta Flip", group=groupCol)
 lineLeftExt = input.int(50, "Line Left Extension", minval=1, group=groupCol)
 lineStyleInput = input.string("Dotted", "Line Style", options=["Solid", "Dashed", "Dotted"], group=groupCol)
 lineWidth = input.int(2, "Line Width", minval=1, maxval=4, group=groupCol)
@@ -684,6 +699,8 @@ if needsRedraw
                     bool isGex = lvlType == "CW" or lvlType == "PW"
                     bool isSys = lvlType == "ZG" or lvlType == "MP" or lvlType == "EH" or lvlType == "EL" or lvlType == "VH" or lvlType == "VL"
                     bool isStr = lvlType == "PDH" or lvlType == "PDL" or lvlType == "PWH" or lvlType == "PWL"
+                    bool isCM = lvlType == "CM"
+                    bool isDF = lvlType == "DF"
                     bool passThresh = not enableThreshold or not isGex or nz(lvlMag) >= gexThreshold or nz(lvlMag) == 0.0
                     bool isAbove = cv > close
                     bool isProtected = (not na(closestAbove) and cv == closestAbove) or (not na(closestBelow) and cv == closestBelow)
@@ -693,8 +710,14 @@ if needsRedraw
                         shouldShow := isProtected or (isAbove ? gexAboveDrawn < halfMax : gexBelowDrawn < halfMax)
                     else if isSys and showSystemLevels
                         shouldShow := true
-                    else if isStr and showStructureLevels
+                    else if isCM and showCharmMagnet
                         shouldShow := true
+                    else if isDF and showDeltaFlip
+                        shouldShow := true
+                    // isStr (PDH/PDL/PWH/PWL) intentionally NOT drawn from the data
+                    // string — PA is now computed autonomously from the chart's own
+                    // OHLC below, so it is always in chart scale (no conversion, no
+                    // cross-family contamination). The PA in the payload is ignored.
 
                     if shouldShow and inRange
                         color lvlColor = color.gray
@@ -738,9 +761,16 @@ if needsRedraw
                         else if isStr
                             lvlColor := colorStructure
                             sc := 2
+                        else if lvlType == "CM"
+                            lvlColor := colorCharm
+                        else if lvlType == "DF"
+                            lvlColor := colorDeltaFlip
+                            sc := 1
 
                         var string ls = line.style_dotted
                         ls := sc == 2 ? line.style_dotted : sc == 1 ? line.style_dashed : f_lineStyle(lineStyleInput)
+                        if isCM
+                            ls := line.style_solid
                         // Width: flipped CW/PW lose 1pt (min 1) so the line reads as
                         // "weakened in its current role". The user's chosen lineWidth
                         // remains the baseline for non-flipped walls.
@@ -753,6 +783,22 @@ if needsRedraw
                         // GEX profile bars so it overlaps neither candles nor profile.
                         int lblX = labelSide == "Right" ? bar_index + profileOffset + profileWidth + 5 : bar_index - lineLeftExt
                         array.push(gexLabels, label.new(lblX, cv, dLabel, color=lvlColor, style=label.style_label_left, textcolor=color.white, size=size.small, tooltip=finalTT))
+
+    // ── Draw Price Action (PDH/PDL/PWH/PWL) ──
+    // Computed on the chart's OWN OHLC (dPrevH/dPrevL = prior day, wPrevH/wPrevL =
+    // prior week, from the top-level request.security). Always in chart scale — no
+    // f_convertPrice, no cross-family contamination. Replaces the PA that used to
+    // arrive (and leak across tickers) in the data string.
+    if showStructureLevels
+        float[]  paPrices = array.from(dPrevH, dPrevL, wPrevH, wPrevL)
+        string[] paCodes  = array.from("PDH", "PDL", "PWH", "PWL")
+        string[] paNames  = array.from("Prior Day High", "Prior Day Low", "Prior Week High", "Prior Week Low")
+        for pi = 0 to 3
+            float paPrice = array.get(paPrices, pi)
+            if not na(paPrice)
+                array.push(gexLines, line.new(bar_index - lineLeftExt, paPrice, bar_index + profileOffset, paPrice, color=colorStructure, style=line.style_dotted, width=lineWidth, extend=extend.both))
+                int paLblX = labelSide == "Right" ? bar_index + profileOffset + profileWidth + 5 : bar_index - lineLeftExt
+                array.push(gexLabels, label.new(paLblX, paPrice, str.tostring(paPrice, format.mintick) + " " + array.get(paCodes, pi) + " " + array.get(paNames, pi), color=colorStructure, style=label.style_label_left, textcolor=color.white, size=size.small))
 
     // ── Draw Profile Bars ──
     if showProfile and profileData != ""
@@ -803,7 +849,9 @@ if needsRedraw
                     float s = str.tonumber(array.get(p, 0))
                     string t = array.get(p, 1)
                     if not na(s)
-                        bool isTracked = t == "CW" or t == "PW" or t == "ZG" or t == "MP" or t == "EH" or t == "EL" or t == "VH" or t == "VL" or t == "PDH" or t == "PDL" or t == "PWH" or t == "PWL"
+                        // PDH/PDL/PWH/PWL excluded here — PA now comes from the
+                        // chart's own OHLC (added below), not the data string.
+                        bool isTracked = t == "CW" or t == "PW" or t == "ZG" or t == "MP" or t == "EH" or t == "EL" or t == "VH" or t == "VL"
                         if isTracked
                             array.push(allLevels, f_convertPrice(s))
                             string nm = array.size(p) >= 3 ? array.get(p, 2) : t
@@ -829,6 +877,21 @@ if needsRedraw
         if not na(pPD)
             array.push(allLevels, pPD)
             array.push(allNames, str.tostring(math.round(pPD)) + " AVWAP US PD")
+
+        // Price Action from the chart's own OHLC (same source as the PA lines).
+        if showStructureLevels
+            if not na(dPrevH)
+                array.push(allLevels, dPrevH)
+                array.push(allNames, str.tostring(math.round(dPrevH)) + " PDH")
+            if not na(dPrevL)
+                array.push(allLevels, dPrevL)
+                array.push(allNames, str.tostring(math.round(dPrevL)) + " PDL")
+            if not na(wPrevH)
+                array.push(allLevels, wPrevH)
+                array.push(allNames, str.tostring(math.round(wPrevH)) + " PWH")
+            if not na(wPrevL)
+                array.push(allLevels, wPrevL)
+                array.push(allNames, str.tostring(math.round(wPrevL)) + " PWL")
 
         // Parallel sort by price ascending (bubble sort to keep names in sync)
         int sz = array.size(allLevels)

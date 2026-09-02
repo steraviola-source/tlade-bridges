@@ -24,12 +24,28 @@ var bool  ndxQqqRatioLoaded = false
 groupGex = "GEX Data"
 string WEEKLY_DATA = input.text_area("S:178.00|R:41.094|L:28932,ZG,ZERO GAMMA,Zero Gamma~Key pivot where dealer gamma flips~Price magnet,0;29068,MP,MAX PAIN,Max Pain~Strike with maximum option pain~Expiry target,0;29018,EH,EM HIGH,Expected Move HIGH~1-sigma upper boundary~Statistical resistance,0;28546,EL,EM LOW,Expected Move LOW~1-sigma lower boundary~Statistical support,0;29049,VH,VOL HIGH,Vol Band HIGH~Volatility-based resistance~ZG + 25% EM,0;28814,VL,VOL LOW,Vol Band LOW~Volatility-based support~ZG - 25% EM,0;29268,CW,Call Wall,Strike: 29268~From Spot: +0.30%~Tot GEX: 189.75M~C/P Ratio: 61.6~Hold: 80% | Break: 20%,189.8;29568,CW,Call Wall,Strike: 29568~From Spot: +1.33%~Tot GEX: 124.51M~Hold: 80% | Break: 20%,124.5;29428,CW,Call Wall,Strike: 29428~From Spot: +0.85%~Tot GEX: 73.46M~C/P Ratio: 6.1~Hold: 80% | Break: 20%,73.5;29578,CW,Call Wall,Strike: 29578~From Spot: +1.37%~Tot GEX: 53.78M~C/P Ratio: 4.6~Hold: 80% | Break: 20%,53.8;29378,CW,Call Wall,Strike: 29378~From Spot: +0.68%~Tot GEX: 42.90M~C/P Ratio: 1.5~Hold: 80% | Break: 20%,42.9;29278,CW,Call Wall,Strike: 29278~From Spot: +0.34%~Tot GEX: 31.77M~C/P Ratio: 3.2~Hold: 80% | Break: 20%,31.8;29478,CW,Call Wall,Strike: 29478~From Spot: +1.02%~Tot GEX: 29.04M~C/P Ratio: 7.1~Hold: 66% | Break: 34%,29.0;29228,CW,Call Wall,Strike: 29228~From Spot: +0.17%~Tot GEX: 27.22M~C/P Ratio: 1.6~Hold: 73% | Break: 27%,27.2;29448,CW,Call Wall,Strike: 29448~From Spot: +0.92%~Tot GEX: 26.93M~Hold: 66% | Break: 34%,26.9;29328,CW,Call Wall,Strike: 29328~From Spot: +0.51%~Tot GEX: 25.91M~C/P Ratio: 2.3~Hold: 71% | Break: 29%,25.9;29518,CW,Call Wall,Strike: 29518~From Spot: +1.16%~Tot GEX: 23.58M~C/P Ratio: 4.0~Hold: 66% | Break: 34%,23.6;29248,CW,Call Wall,Strike: 29248~From Spot: +0.24%~Tot GEX: 23.05M~C/P Ratio: 2.8~Hold: 59% | Break: 41%,23.1;29438,CW,Call Wall,Strike: 29438~From Spot: +0.89%~Tot GEX: 21.11M~C/P Ratio: 27.7~Hold: 51% | Break: 49%,21.1;29608,CW,Call Wall,Strike: 29608~From Spot: +1.47%~Tot GEX: 20.59M~Hold: 45% | Break: 55%,20.6;28778,CW,Call Wall,Strike: 28778~From Spot: -1.38%~Tot GEX: 43.26M~C/P Ratio: 2.4~Hold: 80% | Break: 20%,43.3;29178,PW,Put Wall,Strike: 29178~From Spot: -0.00%~Tot GEX: 38.69M~C/P Ratio: 0.7~Hold: 80% | Break: 20%,38.7;29078,PW,Put Wall,Strike: 29078~From Spot: -0.35%~Tot GEX: 33.04M~C/P Ratio: 0.8~Hold: 80% | Break: 20%,33.0;29028,PW,Put Wall,Strike: 29028~From Spot: -0.52%~Tot GEX: 30.75M~C/P Ratio: 0.6~Hold: 78% | Break: 22%,30.8;28978,PW,Put Wall,Strike: 28978~From Spot: -0.69%~Tot GEX: 25.45M~C/P Ratio: 0.3~Hold: 77% | Break: 23%,25.4;29128,CW,Call Wall,Strike: 29128~From Spot: -0.18%~Tot GEX: 23.83M~C/P Ratio: 2.3~Hold: 72% | Break: 28%,23.8;29053,PW,Put Wall,Strike: 29053~From Spot: -0.43%~Tot GEX: 23.22M~C/P Ratio: 0.5~Hold: 59% | Break: 41%,23.2;28878,PW,Put Wall,Strike: 28878~From Spot: -1.03%~Tot GEX: 22.04M~C/P Ratio: 0.5~Hold: 59% | Break: 41%,22.0;29158,CW,Call Wall,Strike: 29158~From Spot: -0.07%~Tot GEX: 19.00M~C/P Ratio: 1.3~Hold: 60% | Break: 40%,19.0;28928,CW,Call Wall,Strike: 28928~From Spot: -0.86%~Tot GEX: 16.47M~C/P Ratio: 1.7~Hold: 59% | Break: 41%,16.5;29088,CW,Call Wall,Strike: 29088~From Spot: -0.31%~Tot GEX: 14.13M~C/P Ratio: 21.5~Hold: 52% | Break: 48%,14.1;29168,PW,Put Wall,Strike: 29168~From Spot: -0.04%~Tot GEX: 13.98M~C/P Ratio: 0.3~Hold: 46% | Break: 54%,14.0;29098,CW,Call Wall,Strike: 29098~From Spot: -0.28%~Tot GEX: 12.98M~C/P Ratio: 2.4~Hold: 46% | Break: 54%,13.0;29038,CW,Call Wall,Strike: 29038~From Spot: -0.48%~Tot GEX: 12.83M~C/P Ratio: 1.5~Hold: 48% | Break: 52%,12.8;28968,PW,Put Wall,Strike: 28968~From Spot: -0.72%~Tot GEX: 12.74M~C/P Ratio: 0.5~Hold: 30% | Break: 70%,12.7|P:27578,-0.1,-1;27678,-0.1,-1;27778,-0.1,-1;27978,-0.1,-1;28028,-0.1,-1;28078,-0.4,-1;28178,-0.2,-1;28278,-0.1,-1;28378,-0.2,-1;28478,-0.3,-1;28528,-0.1,-1;28578,-0.3,-1;28588,-0.1,-1;28618,-0.3,-1;28628,-0.5,-1;28638,-0.1,-1;28668,-0.3,-1;28678,-0.6,-1;28708,-0.3,-1;28728,-0.3,-1;28738,-0.3,-1;28753,-0.3,-1;28778,1.0,1;28788,-0.1,-1;28798,-0.1,-1;28803,-0.2,-1;28808,-0.2,-1;28838,-0.3,-1;28848,-0.5,-1;28853,-0.2,-1;28868,-0.2,-1;28878,-0.4,-1;28908,-0.2,-1;28918,-0.2,-1;28928,0.2,1;28948,-0.2,-1;28953,-0.6,-1;28968,-0.2,-1;28978,-0.8,-1;28988,0.1,1;28998,0.2,1;29003,-0.1,-1;29008,-0.2,-1;29028,-0.4,-1;29038,0.1,1;29048,-0.3,-1;29053,-0.4,-1;29068,0.5,1;29078,-0.1,-1;29088,0.7,1;29098,0.3,1;29103,0.1,1;29108,0.3,1;29118,0.4,1;29128,0.5,1;29138,0.2,1;29148,0.6,1;29158,0.1,1;29168,-0.4,-1;29178,-0.3,-1;29188,0.2,1;29198,0.8,1;29203,0.1,1;29208,0.9,1;29228,0.3,1;29238,0.5,1;29248,0.6,1;29253,0.3,1;29258,0.1,1;29268,10.0,1;29278,0.9,1;29288,0.4,1;29298,0.2,1;29303,0.3,1;29308,0.6,1;29318,0.3,1;29328,0.6,1;29338,0.4,1;29353,-0.4,-1;29358,-0.3,-1;29378,0.5,1;29388,0.2,1;29398,0.1,1;29403,0.8,1;29408,0.9,1;29418,0.3,1;29428,2.9,1;29438,1.1,1;29448,1.5,1;29453,0.4,1;29468,0.5,1;29478,1.2,1;29488,0.3,1;29498,0.6,1;29503,0.1,1;29518,0.8,1;29528,0.3,1;29553,0.2,1;29558,0.2,1;29568,6.8,1;29578,1.9,1;29588,0.1,1;29608,1.1,1;29618,0.1,1;29628,0.3,1;29638,1.0,1;29648,0.1,1;29668,1.1,1;29678,1.5,1;29688,2.7,1;29703,-0.1,-1;29708,1.0,1;29778,0.6,1;29788,0.1,1;29798,0.2,1;29803,0.2,1;29808,0.2,1;29818,0.2,1;29828,0.2,1;29878,0.3,1;29978,0.4,1;30028,0.1,1;30058,0.2,1;30078,0.2,1;30178,1.0,1;30678,0.2,1;31278,0.3,1")
 gexDataInput = input.text_area("", title="Live GEX Override", group=groupGex, tooltip="Paste live data to override weekly. Leave empty for weekly.")
-string gexDataActive = gexDataInput != "" ? gexDataInput : WEEKLY_DATA
+string gexDataRaw = gexDataInput != "" ? gexDataInput : WEEKLY_DATA
+// Robustness: some copy/paste paths (notably iOS) route the string through a
+// URL and percent-encode it ("|" -> "%7C", space -> "%20") and may lowercase
+// the leading "S:". Decode here so the parser reads it regardless of how it was
+// copied. This is the only normalization point — both f_parseWalls() and the
+// main parse block inherit gexDataActive. Guarded on "%7C" (the encoded pipe):
+// level tooltips already contain "%" ("Break: 20%"), so a plain "%" guard would
+// fire on every clean string. No-op for a clean desktop paste.
+string gexDataActive = gexDataRaw
+if str.contains(gexDataActive, "%7C") or str.contains(gexDataActive, "%7c")
+    gexDataActive := str.replace_all(gexDataActive, "%7C", "|")
+    gexDataActive := str.replace_all(gexDataActive, "%7c", "|")
+    gexDataActive := str.replace_all(gexDataActive, "%20", " ")
+if str.startswith(gexDataActive, "s:")
+    gexDataActive := "S:" + str.substring(gexDataActive, 2)
 
 groupGexVis = "GEX Visibility"
 showGexLevels = input.bool(true, "Call/Put Walls", group=groupGexVis)
 showSystemLevels = input.bool(true, "System (ZG, MaxPain, EM, VolBands)", group=groupGexVis)
 showStructureLevels = input.bool(true, "Structure (PDH/PDL/PWH/PWL)", group=groupGexVis)
+showCharmMagnet = input.bool(true, "Charm Magnet", group=groupGexVis)
+showDeltaFlip = input.bool(true, "Delta Flip", group=groupGexVis)
 showProfile = input.bool(true, "GEX Profile Bars", group=groupGexVis)
 maxLevelsChoice = input.string("10", "Max GEX Levels", options=["5", "10", "15", "20", "All"], group=groupGexVis)
 int maxVisibleLevels = maxLevelsChoice == "All" ? 999 : int(str.tonumber(maxLevelsChoice))
@@ -44,10 +60,10 @@ barThickness = input.int(8, "Bar Height", group=groupProfile, inline="p1")
 profileOffset = input.int(15, "Offset", group=groupProfile)
 
 groupBOS = "Breakout Structure (BOS)"
-showBOS_M = input.bool(true, "Monthly", group=groupBOS, inline="bos0")
-showBOS_W = input.bool(true, "Weekly", group=groupBOS, inline="bos0")
-showBOS_D = input.bool(true, "Daily", group=groupBOS, inline="bos1")
-showBOS_H4 = input.bool(true, "4H", group=groupBOS, inline="bos1")
+showBOS_M = input.bool(false, "Monthly", group=groupBOS, inline="bos0")
+showBOS_W = input.bool(false, "Weekly", group=groupBOS, inline="bos0")
+showBOS_D = input.bool(false, "Daily", group=groupBOS, inline="bos1")
+showBOS_H4 = input.bool(false, "4H", group=groupBOS, inline="bos1")
 showBOS_H1 = input.bool(false, "1H", group=groupBOS, inline="bos2")
 bosLineWidth = input.int(2, "BOS Line Width", minval=1, maxval=4, group=groupBOS)
 colorBOS_Bull = input.color(#22c55e, "Bull", group=groupBOS, inline="bosc")
@@ -87,6 +103,8 @@ colorMaxPain = input.color(#ef4444, "Max Pain", group=groupCol, inline="sys1")
 colorEM = input.color(#3b82f6, "Expected Move", group=groupCol, inline="sys2")
 colorVolBand = input.color(#9ca3af, "Vol Bands", group=groupCol, inline="sys2")
 colorStructure = input.color(#9ca3af, "Structure", group=groupCol)
+colorCharm = input.color(#f97316, "Charm Magnet", group=groupCol)
+colorDeltaFlip = input.color(#f59e0b, "Delta Flip", group=groupCol)
 lineLeftExt = input.int(50, "Line Left Extension", minval=1, group=groupCol)
 lineStyleInput = input.string("Dotted", "Line Style", options=["Solid", "Dashed", "Dotted"], group=groupCol)
 lineWidth = input.int(2, "Line Width", minval=1, maxval=4, group=groupCol)
@@ -131,6 +149,7 @@ var label[] confluenceLabels = array.new_label()
 var line[] gexLines = array.new_line()
 var label[] gexLabels = array.new_label()
 var label timestampLabel = na
+var label ratioErrLabel = na
 var string prevState = ""
 var int lastBarIdx = -1
 
@@ -606,6 +625,9 @@ if needsRedraw
     array.clear(gexLabels)
     if not na(timestampLabel)
         label.delete(timestampLabel)
+    if not na(ratioErrLabel)
+        label.delete(ratioErrLabel)
+        ratioErrLabel := na
 
     lastBarIdx := bar_index
     timestampLabel := label.new(bar_index + profileOffset, high + syminfo.mintick * 50, "TLADe " + tickerChoice, color=color.new(color.gray, 100), style=label.style_label_center, textcolor=color.new(color.gray, 40), size=size.tiny)
@@ -646,7 +668,7 @@ if needsRedraw
     // string, show an error and skip drawing rather than plot wrong prices.
     bool qqqNoRatio = tickerChoice == "QQQ" and not ndxQqqRatioLoaded
     if qqqNoRatio
-        label.new(bar_index, high, "TLADe: QQQ ratio missing — re-copy the data string from the terminal (must include R:).", color=color.new(color.red, 0), style=label.style_label_down, textcolor=color.white, size=size.small)
+        ratioErrLabel := label.new(bar_index, high, "TLADe: QQQ ratio missing — re-copy the data string from the terminal (must include R:).", color=color.new(color.red, 0), style=label.style_label_down, textcolor=color.white, size=size.small)
 
     // ── Draw Levels (identical to GEX Dashboard v6.8) ──
     if levelsData != "" and not qqqNoRatio
@@ -688,6 +710,8 @@ if needsRedraw
                     bool isGex = lvlType == "CW" or lvlType == "PW"
                     bool isSys = lvlType == "ZG" or lvlType == "MP" or lvlType == "EH" or lvlType == "EL" or lvlType == "VH" or lvlType == "VL"
                     bool isStr = lvlType == "PDH" or lvlType == "PDL" or lvlType == "PWH" or lvlType == "PWL"
+                    bool isCM = lvlType == "CM"
+                    bool isDF = lvlType == "DF"
                     bool passThresh = not enableThreshold or not isGex or nz(lvlMag) >= gexThreshold or nz(lvlMag) == 0.0
                     bool isAbove = cv > close
                     bool isProtected = (not na(closestAbove) and cv == closestAbove) or (not na(closestBelow) and cv == closestBelow)
@@ -696,6 +720,10 @@ if needsRedraw
                     if isGex and showGexLevels and passThresh
                         shouldShow := isProtected or (isAbove ? gexAboveDrawn < halfMax : gexBelowDrawn < halfMax)
                     else if isSys and showSystemLevels
+                        shouldShow := true
+                    else if isCM and showCharmMagnet
+                        shouldShow := true
+                    else if isDF and showDeltaFlip
                         shouldShow := true
                     // isStr (PDH/PDL/PWH/PWL) intentionally NOT drawn from the data
                     // string — PA is now computed autonomously from the chart's own
@@ -740,9 +768,16 @@ if needsRedraw
                         else if isStr
                             lvlColor := colorStructure
                             sc := 2
+                        else if lvlType == "CM"
+                            lvlColor := colorCharm
+                        else if lvlType == "DF"
+                            lvlColor := colorDeltaFlip
+                            sc := 1
 
                         var string ls = line.style_dotted
                         ls := sc == 2 ? line.style_dotted : sc == 1 ? line.style_dashed : f_lineStyle(lineStyleInput)
+                        if isCM
+                            ls := line.style_solid
                         int useWidth = isWallFlipped ? math.max(lineWidth - 1, 1) : lineWidth
                         array.push(gexLines, line.new(bar_index - lineLeftExt, cv, bar_index + profileOffset, cv, color=lvlColor, style=ls, width=useWidth, extend=extend.both))
                         string flipSuffix = isWallFlipped ? " ↺" : ""
